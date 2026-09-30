@@ -22,3 +22,6 @@ testing/results.json
 testing/ab-*-times.json
 testing/vocab_ua.txt
 testing/.ptt-state-config.json
+
+# Local Claude Code settings
+.claude/
