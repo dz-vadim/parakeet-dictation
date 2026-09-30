@@ -4,3 +4,21 @@ __pycache__/
 models/**/*.onnx
 models/**/*.bin
 *.deb
+
+# Local test data — voice recordings, transcripts of the user's speech, downloaded
+# models and scratch venvs. Never publish these.
+*.wav
+testing/recordings/
+testing/staging/
+testing/models/
+testing/.venv-fw/
+testing/segs/
+testing/ab-segs/
+testing/ab2-segs/
+testing/out-*.txt
+testing/dictated*.txt
+testing/*.log
+testing/results.json
+testing/ab-*-times.json
+testing/vocab_ua.txt
+testing/.ptt-state-config.json
