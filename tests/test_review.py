@@ -547,12 +547,114 @@ def review5_recognizer_cache_keyed_on_language():
 
 
 # ---------------------------------------------------------------------------
+# #6  The streaming path commits what is still in the stream when the
+#     session stops — the tail after the last endpoint used to be lost.
+# ---------------------------------------------------------------------------
+
+class FakeOnlineStream:
+    def __init__(self):
+        self.pending = 0
+        self.decoded = 0
+        self.finished = False
+
+    def accept_waveform(self, _sr, _samples):
+        self.pending += 1
+
+    def input_finished(self):
+        self.finished = True
+        self.pending += 1          # the frames the encoder was holding back
+
+
+class FakeOnlineRecognizer:
+    """sherpa's OnlineRecognizer as _run_streaming drives it: one more word
+    per decoded chunk, and the endpoint never fires (the user let go
+    mid-sentence)."""
+
+    def __init__(self, words):
+        self._words = words
+        self.resets = 0
+
+    def create_stream(self):
+        return FakeOnlineStream()
+
+    def is_ready(self, s):
+        return s.pending > 0
+
+    def decode_stream(self, s):
+        s.pending -= 1
+        s.decoded += 1
+
+    def get_result(self, s):
+        return " ".join(self._words[:min(s.decoded, len(self._words))])
+
+    def is_endpoint(self, _s):
+        return False
+
+    def reset(self, s):
+        self.resets += 1
+        s.decoded = 0
+
+
+class CountedStream:
+    """N reads of silence, then the stop flag."""
+
+    def __init__(self, reads, stop_event):
+        self._left = reads
+        self._stop = stop_event
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def read(self, n):
+        self._left -= 1
+        if self._left <= 0:
+            self._stop.set()
+        return np.zeros((n, 1), dtype=np.float32), False
+
+
+def _streaming_session(partial_overwrite):
+    words = ["one", "two", "three", "four", "five", "six"]
+    texts, commits, partials = [], [], []
+    config = da_config.AppConfig(partial_overwrite=partial_overwrite)
+    engine = da_engine.ASREngine(
+        config, {"streaming": True, "files": {}},
+        on_text=texts.append, on_partial=partials.append, on_error=lambda e: texts.append(f"ERROR {e}"),
+        on_partial_type=lambda t: None, on_commit_partial=commits.append)
+    rec = FakeOnlineRecognizer(words)
+    engine._acquire_online_recognizer = lambda: (rec, 0.0)
+    stop = threading.Event()
+    da_engine.sd.InputStream = lambda **_kw: CountedStream(5, stop)
+    engine._run_streaming(stop)
+    return texts, commits, partials, rec
+
+
+def review6_streaming_flushes_tail_on_stop():
+    print("\n[#6] the streaming session commits its tail when it stops")
+    texts, commits, partials, rec = _streaming_session(partial_overwrite=False)
+    check("five chunks decoded to a five-word partial before the stop",
+          "one two three four five" in partials, str(partials[-2:]))
+    check("the stop committed the whole tail, including the frames held back",
+          texts == ["one two three four five six"], str(texts))
+    check("no endpoint fired, so this came from the end-of-session flush",
+          rec.resets == 0)
+
+    texts, commits, partials, rec = _streaming_session(partial_overwrite=True)
+    check("with partial_overwrite the tail goes through commit_partial",
+          commits == ["one two three four five six"] and texts == [],
+          f"commits={commits} texts={texts}")
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
             2: review2_take_ends_even_if_the_typer_raises,
             3: review3_apply_config_preloads_on_model_switch,
             4: review4_hotkey_rebuild_unsubscribes,
-            5: review5_recognizer_cache_keyed_on_language}
+            5: review5_recognizer_cache_keyed_on_language,
+            6: review6_streaming_flushes_tail_on_stop}
 
 
 def main(argv):

@@ -819,4 +819,20 @@ class ASREngine:
                     with INFERENCE_LOCK:
                         recognizer.reset(stream)
 
-        DIAG.log("session_stop", mode="streaming", overflow=overflow)
+        # End of session.  Everything after the last endpoint is still in the
+        # stream and used to be lost with it: a release mid-sentence is the
+        # common case, not the exception.  Tell the recognizer no more audio
+        # is coming (it then decodes the frames it was holding back), and
+        # commit the result through the same path an endpoint takes.
+        stream.input_finished()
+        with INFERENCE_LOCK:
+            while recognizer.is_ready(stream):
+                recognizer.decode_stream(stream)
+            final = recognizer.get_result(stream).strip()
+        if final:
+            if partial_overwrite:
+                GLib.idle_add(self._on_commit_partial, final)
+            else:
+                GLib.idle_add(self._on_text, final)
+        DIAG.log("session_stop", mode="streaming", overflow=overflow,
+                 flushed=bool(final))
