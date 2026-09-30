@@ -12,11 +12,12 @@ Run:  .venv/bin/python tests/test_defects.py
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
 import time
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import numpy as np
@@ -399,8 +400,111 @@ def defect3_engine_stop():
 
 
 # ---------------------------------------------------------------------------
+# #4  Single instance: the second copy must see the bus name taken and exit.
+# ---------------------------------------------------------------------------
 
-SECTIONS = [defect2_config_load, defect3_engine_stop]
+def _private_bus():
+    """A second connection to the session bus — what another process has."""
+    from gi.repository import Gio
+    addr = Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None)
+    return Gio.DBusConnection.new_for_address_sync(
+        addr, Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+        | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION, None, None)
+
+
+def _request_name(bus, name) -> int:
+    """RequestName through the bus driver, independent of the package."""
+    from gi.repository import Gio, GLib
+    return bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
+                         "org.freedesktop.DBus", "RequestName",
+                         GLib.Variant("(su)", (name, 4)), GLib.VariantType.new("(u)"),
+                         Gio.DBusCallFlags.NONE, 3000, None).unpack()[0]
+
+
+def defect4_single_instance():
+    print("\n[#4] single-instance lock on the session bus")
+    REAL_NAME = "org.kde.parakeet.Dictation"
+
+    # --- main() with the name already owned by "another process" ---------
+    from parakeet_dictation import app as da_app
+    da_app.DIAG = TEST_DIAG
+    try:
+        from parakeet_dictation import instance as da_instance
+        da_instance.DIAG = TEST_DIAG
+    except ImportError:
+        da_instance = None
+    other = _private_bus()
+    reply = _request_name(other, REAL_NAME)
+    check("the real name can be held for this check (no fixed app running)",
+          reply == 1, f"RequestName reply {reply}")
+    if reply == 1:
+        sentinel = da_app.DictationController
+
+        def must_not_build(*_a, **_k):
+            raise AssertionError("main() built the controller with the name taken")
+
+        da_app.DictationController = must_not_build
+        out = io.StringIO()
+        before = len(diag_lines())
+        try:
+            with redirect_stdout(out):
+                rc = da_app.main()
+        except AssertionError as e:
+            rc = repr(e)
+        finally:
+            da_app.DictationController = sentinel
+        check("main() returns 0 without building the app", rc == 0, str(rc))
+        check("and says so in one line, naming the running pid",
+              "already running" in out.getvalue()
+              and f"pid {os.getpid()}" in out.getvalue()
+              and out.getvalue().count("\n") == 1, out.getvalue().strip())
+        check("already_running logged",
+              any("event=already_running" in l for l in diag_lines()[before:]))
+    other.close_sync(None)
+
+    # --- the helper itself, with a fake owner --------------------------------
+    check("the instance module exists", da_instance is not None)
+    if da_instance is None:
+        return
+    name = f"org.kde.parakeet.DictationTest{os.getpid()}"
+    first = da_instance.InstanceLock(name)
+    check("a free name is acquired", first.acquire() is True)
+    other = _private_bus()
+    before = len(diag_lines())
+    second = da_instance.InstanceLock(name, bus=other)
+    check("a second instance is refused", second.acquire() is False)
+    check("it learns the owner's pid", second.owner_pid == os.getpid(),
+          str(second.owner_pid))
+    check("already_running logged with the owner's pid",
+          any("event=already_running" in l and f"owner_pid={os.getpid()}" in l
+              for l in diag_lines()[before:]))
+    first.release()
+    check("once the owner lets go, the next instance gets the name",
+          second.acquire() is True)
+    second.release()
+    other.close_sync(None)
+
+    # --- a second PROCESS, the real thing ------------------------------------
+    holder = da_instance.InstanceLock(name)
+    holder.acquire()
+    probe = (
+        "import sys, pathlib; sys.path.insert(0, %r)\n"
+        "from parakeet_dictation import instance as m\n"
+        "from parakeet_dictation.diagnostics import DiagnosticLog\n"
+        "m.DIAG = DiagnosticLog(pathlib.Path(%r))\n"
+        "lock = m.InstanceLock(%r)\n"
+        "sys.exit(0 if lock.acquire() is False and lock.owner_pid == %d else 1)\n"
+        % (str(HERE.parent), str(DIAG_PATH), name, os.getpid()))
+    proc = subprocess.run([sys.executable, "-c", probe], capture_output=True,
+                          text=True, timeout=30)
+    check("a second process sees the name as taken and knows who holds it",
+          proc.returncode == 0, (proc.stderr or proc.stdout).strip()[-200:])
+    holder.release()
+
+# ---------------------------------------------------------------------------
+
+SECTIONS = [defect2_config_load, defect3_engine_stop,
+            defect4_single_instance]
 
 
 def main():

@@ -14,6 +14,7 @@ from .controller import DictationController
 from .diagnostics import DIAG
 from .focus import FocusTracker
 from .hotkeys import HotkeyManager
+from .instance import InstanceLock
 from .models import _any_model_downloaded
 from .ui.overlay import PillOverlay
 from .ui.tray import TrayIcon
@@ -37,6 +38,15 @@ def main():
         config.typer = "clipboard"
 
     DIAG.set_enabled(config.diagnostics)
+
+    # One instance per session: a second copy would register the same
+    # kglobalaccel component and both would act on every push-to-talk press.
+    lock = InstanceLock()
+    if not lock.acquire():
+        who = f" (pid {lock.owner_pid})" if lock.owner_pid else ""
+        print(f"{APP_NAME} is already running{who}; this copy is exiting.")
+        return 0
+
     DIAG.log("app_start", profile=config.model_profile,
              threads=config.num_threads, typer=config.typer,
              paste_chord=config.paste_chord, transport=config.paste_transport,
@@ -125,3 +135,4 @@ def main():
     focus.stop()                       # unload the KWin script we loaded
     insert.portal_keyboard().close()
     overlay.shutdown()
+    return 0
