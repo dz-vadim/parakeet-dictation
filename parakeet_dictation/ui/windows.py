@@ -740,7 +740,8 @@ class SettingsDialog(Gtk.Dialog):
             "• All models include punctuation and capitalization\n"
             "• Non-streaming models wait for a brief pause, then transcribe\n"
             "• Streaming model transcribes continuously but may revise text\n"
-            "• More CPU threads = faster transcription (4-8 recommended)\n"
+            "• CPU threads: 4 is the measured default — ONNX Runtime's pool spins "
+            "between decodes, so more threads burn cores without a faster result\n"
             "• Pause hotkey mutes mic without unloading model (fast resume)"
         )
         about_text.set_halign(Gtk.Align.START)

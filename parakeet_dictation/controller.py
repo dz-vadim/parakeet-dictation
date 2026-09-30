@@ -195,8 +195,9 @@ class DictationController:
 
         Hold mode has a natural end, so holding text back is possible there
         at all — and required (see AppConfig.insert_mode): end_of_take is the
-        default.  A toggle session may run for minutes, which is why
-        per-segment still exists as a setting for that mode.
+        default.  A toggle session (tray or SIGUSR1; pynput cannot grab keys
+        on KDE Wayland) may run for minutes, which is why per-segment still
+        exists as a setting for that mode.
         """
         return self._config.insert_mode == "end_of_take"
 

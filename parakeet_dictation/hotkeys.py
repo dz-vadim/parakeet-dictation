@@ -1,4 +1,10 @@
-"""Global shortcuts: kglobalaccel push-to-talk and the pynput bindings."""
+"""Global shortcuts.
+
+Push-to-talk (hold mode) is registered with kglobalaccel, the only path that
+grabs a key on KDE Wayland.  The toggle / start-stop / pause bindings still go
+through a pynput listener, which only sees keys inside this app's own windows
+there; the tray and the SIGUSR1/SIGUSR2 signals are what drive those modes.
+"""
 
 import re
 
