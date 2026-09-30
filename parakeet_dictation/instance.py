@@ -12,8 +12,9 @@ synchronously, before anything else is set up: Gio.bus_own_name() answers
 through main-loop callbacks, which would mean building the whole app first.
 """
 
-from gi.repository import Gio, GLib
+from gi.repository import GLib
 
+from .dbus import call_sync, session_bus
 from .diagnostics import DIAG
 
 BUS_NAME = "org.kde.parakeet.Dictation"
@@ -35,10 +36,8 @@ class InstanceLock:
         self.held = False
 
     def _driver(self, method, params, reply_type, timeout_ms=3000):
-        return self._bus.call_sync(
-            _DRIVER, _DRIVER_PATH, _DRIVER, method, params,
-            GLib.VariantType.new(reply_type), Gio.DBusCallFlags.NONE,
-            timeout_ms, None).unpack()
+        return call_sync(self._bus, _DRIVER, _DRIVER_PATH, _DRIVER, method, params,
+                         reply_type, timeout_ms).unpack()
 
     def acquire(self) -> bool:
         """True when this process now owns the name.
@@ -50,7 +49,7 @@ class InstanceLock:
         """
         try:
             if self._bus is None:
-                self._bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+                self._bus = session_bus()
             reply = self._driver("RequestName", GLib.Variant("(su)", (self.name, _FLAG_DO_NOT_QUEUE)),
                                  "(u)")[0]
         except GLib.Error as e:

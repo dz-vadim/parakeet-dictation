@@ -39,6 +39,7 @@ from gi.repository import Gio, GLib
 
 from . import config as _config
 from .config import DEFAULT_NO_CTRL_V_CLASSES, DEFAULT_TERMINAL_CLASSES
+from .dbus import call_sync, session_bus
 from .diagnostics import DIAG
 
 
@@ -256,21 +257,17 @@ class PortalKeyboard:
 
     def _call(self, method, params, reply_type=None, timeout_ms=5000, path=None,
               iface=None):
-        return self._bus.call_sync(
-            self.BUS, path or self.PATH, iface or self.IFACE, method, params,
-            GLib.VariantType.new(reply_type) if reply_type else None,
-            Gio.DBusCallFlags.NONE, timeout_ms, None)
+        return call_sync(self._bus, self.BUS, path or self.PATH, iface or self.IFACE,
+                         method, params, reply_type, timeout_ms)
 
     def interface_present(self) -> bool:
         """RemoteDesktop >= 2 on the bus (NotifyKeyboardKeysym exists)."""
         try:
             if self._bus is None:
-                self._bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            version = self._bus.call_sync(
-                self.BUS, self.PATH, "org.freedesktop.DBus.Properties", "Get",
-                GLib.Variant("(ss)", (self.IFACE, "version")),
-                GLib.VariantType.new("(v)"), Gio.DBusCallFlags.NONE, 3000,
-                None).unpack()[0]
+                self._bus = session_bus()
+            version = self._call("Get", GLib.Variant("(ss)", (self.IFACE, "version")),
+                                 "(v)", timeout_ms=3000,
+                                 iface="org.freedesktop.DBus.Properties").unpack()[0]
             return int(version) >= 2
         except (GLib.Error, TypeError, ValueError):
             return False

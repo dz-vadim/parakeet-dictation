@@ -21,6 +21,7 @@ from pathlib import Path
 
 from gi.repository import Gio, GLib
 
+from .dbus import call_sync, session_bus
 from .diagnostics import DIAG
 
 FocusSnapshot = namedtuple("FocusSnapshot",
@@ -70,10 +71,8 @@ class FocusTracker:
     # -- D-Bus plumbing -----------------------------------------------------
 
     def _call(self, path, iface, method, params, reply_type=None, timeout=2000):
-        return self._bus.call_sync(
-            self.KWIN, path, iface, method, params,
-            GLib.VariantType.new(reply_type) if reply_type else None,
-            Gio.DBusCallFlags.NONE, timeout, None)
+        return call_sync(self._bus, self.KWIN, path, iface, method, params,
+                         reply_type, timeout)
 
     def _on_report(self, _conn, _sender, _path, _iface, _method, params, invocation):
         rc, rn, cap, pid = params.unpack()
@@ -93,7 +92,7 @@ class FocusTracker:
         invocation.return_value(None)
 
     def _export(self) -> bool:
-        self._bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        self._bus = session_bus()
         info = Gio.DBusNodeInfo.new_for_xml(_INTROSPECTION).interfaces[0]
         self._reg_id = self._bus.register_object_with_closures2(
             self.OBJECT_PATH, info, self._on_report, None, None)

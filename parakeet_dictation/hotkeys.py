@@ -5,6 +5,7 @@ import re
 from gi.repository import Gio, GLib
 
 from .config import APP_ID, APP_NAME, AppConfig
+from .dbus import call_sync
 from .diagnostics import DIAG
 
 # ---------------------------------------------------------------------------
@@ -100,10 +101,8 @@ class KGlobalAccelHotkey:
         self.registered = False
 
     def _call(self, path, iface, method, params, reply_type=None):
-        return self._bus.call_sync(
-            self.SERVICE, path, iface, method, params,
-            GLib.VariantType.new(reply_type) if reply_type else None,
-            Gio.DBusCallFlags.NONE, 5000, None)
+        return call_sync(self._bus, self.SERVICE, path, iface, method, params,
+                         reply_type, 5000)
 
     def _owner_of(self, key: int) -> str:
         """Unique name of the component already holding `key`, if any."""
