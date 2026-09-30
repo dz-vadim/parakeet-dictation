@@ -28,7 +28,11 @@ MODELS_DIR = DATA_DIR / "models"
 class AppConfig:
     # Model
     model_profile: str = "desktop"
-    num_threads: int = min(os.cpu_count() or 4, 8)
+    # Recognizer threads.  4, not 8: ONNX Runtime's thread pool spins between
+    # calls, so with the 1 s live-preview cadence 8 threads cost ~11 cores
+    # per take and made the decode the user waits for 7x slower; 4 costs ~3
+    # cores with that decode unaffected (docs/measurements/2026-09-30-preview-cost.md).
+    num_threads: int = min(os.cpu_count() or 4, 4)
     vad_threshold: float = 0.5
 
     # How long a silence has to run before the VAD calls a phrase finished.

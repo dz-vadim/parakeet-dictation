@@ -792,11 +792,38 @@ def defect8_model_hint():
 
 
 # ---------------------------------------------------------------------------
+# #9  num_threads defaults to 4 (docs/measurements/2026-09-30-preview-cost.md:
+#     8 threads made a 1 s preview cadence cost ~11 cores and the final
+#     decode 7x slower; 4 costs ~3 cores with the final decode unaffected).
+# ---------------------------------------------------------------------------
+
+def defect9_thread_default():
+    print("\n[#9] num_threads defaults to 4")
+    cpus = os.cpu_count() or 4
+    expected = min(cpus, 4)
+    check(f"default is {expected} on this {cpus}-thread machine",
+          da_config.AppConfig().num_threads == expected,
+          str(da_config.AppConfig().num_threads))
+    check("the default never exceeds 4",
+          da_config.AppConfig.__dataclass_fields__["num_threads"].default <= 4)
+    with tempfile.TemporaryDirectory(prefix="parakeet-cfg-") as tmp:
+        saved = (da_config.CONFIG_DIR, da_config.CONFIG_FILE)
+        da_config.CONFIG_DIR = Path(tmp)
+        da_config.CONFIG_FILE = Path(tmp) / "config.json"
+        try:
+            da_config.CONFIG_FILE.write_text(json.dumps({"num_threads": 8}))
+            check("an explicit num_threads in the file keeps its value",
+                  da_config.AppConfig.load(log=lambda *a, **k: None).num_threads == 8)
+        finally:
+            da_config.CONFIG_DIR, da_config.CONFIG_FILE = saved
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = [defect2_config_load, defect3_engine_stop,
             defect4_single_instance, defect5_missing_helper_named,
             defect6_clipboard_verbatim, defect7_overlay_fallback_honest,
-            defect8_model_hint]
+            defect8_model_hint, defect9_thread_default]
 
 
 def main():
