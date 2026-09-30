@@ -423,7 +423,10 @@ def _request_name(bus, name) -> int:
 
 def defect4_single_instance():
     print("\n[#4] single-instance lock on the session bus")
-    REAL_NAME = "org.kde.parakeet.Dictation"
+    # A private name for the main() check, so this suite runs beside the real
+    # app (which owns org.kde.parakeet.Dictation): main() is pointed at it
+    # through the InstanceLock attribute app.py imported.
+    MAIN_NAME = f"org.kde.parakeet.DictationMain{os.getpid()}"
 
     # --- main() with the name already owned by "another process" ---------
     from parakeet_dictation import app as da_app
@@ -434,16 +437,19 @@ def defect4_single_instance():
     except ImportError:
         da_instance = None
     other = _private_bus()
-    reply = _request_name(other, REAL_NAME)
-    check("the real name can be held for this check (no fixed app running)",
+    reply = _request_name(other, MAIN_NAME)
+    check("the 'other process' holds the name main() will ask for",
           reply == 1, f"RequestName reply {reply}")
     if reply == 1:
         sentinel = da_app.DictationController
+        lock_cls = getattr(da_app, "InstanceLock", None)
 
         def must_not_build(*_a, **_k):
             raise AssertionError("main() built the controller with the name taken")
 
         da_app.DictationController = must_not_build
+        if lock_cls is not None:
+            da_app.InstanceLock = lambda name=MAIN_NAME: lock_cls(name)
         out = io.StringIO()
         before = len(diag_lines())
         try:
@@ -453,6 +459,8 @@ def defect4_single_instance():
             rc = repr(e)
         finally:
             da_app.DictationController = sentinel
+            if lock_cls is not None:
+                da_app.InstanceLock = lock_cls
         check("main() returns 0 without building the app", rc == 0, str(rc))
         check("and says so in one line, naming the running pid",
               "already running" in out.getvalue()
