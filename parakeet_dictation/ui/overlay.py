@@ -428,7 +428,8 @@ class PillOverlay:
 
     MARGIN = 40
     GAP = 8                    # pill-to-preview clearance
-    FRAME_MS = 50              # ~20 Hz
+    FRAME_MS = 50              # ~20 Hz, while the meter or spinner moves
+    PAUSED_FRAME_MS = 1000     # paused: only the clock changes
     SUCCESS_MS = 500
     ERROR_MS = 3000
 
@@ -458,6 +459,7 @@ class PillOverlay:
         self._frozen = 0.0
         self._spin = 0.0
         self._frame_source = 0
+        self._frame_ms = 0            # interval the running frame source uses
         self._grace_source = 0
         self._dismiss_source = 0
         self._watchdog_source = 0
@@ -775,12 +777,29 @@ class PillOverlay:
             self._win.show_all()
         self._place_fallback(width, height)
         self._set_click_through()
-        if not self._frame_source:
-            self._frame_source = GLib.timeout_add(self.FRAME_MS, self._on_frame)
+        self._set_frame_rate()
         self._win.queue_draw()
+
+    def _set_frame_rate(self):
+        """Redraw only as fast as something on the pill changes: 20 Hz for
+        the meter and the spinner, once a second for the paused clock, and
+        not at all for the static success and error captions."""
+        if self._state in ("listening", "speech", "processing", "preparing"):
+            interval = self.FRAME_MS
+        elif self._state == "paused":
+            interval = self.PAUSED_FRAME_MS
+        else:
+            interval = 0
+        if interval == self._frame_ms:
+            return
+        self._clear_source("_frame_source")
+        self._frame_ms = interval
+        if interval:
+            self._frame_source = GLib.timeout_add(interval, self._on_frame)
 
     def _hide(self):
         self._clear_source("_frame_source")
+        self._frame_ms = 0
         self._clear_source("_watchdog_source")
         self._t_start = 0.0
         self._last_level = 0.0
