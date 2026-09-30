@@ -53,6 +53,12 @@ class FakeOverlay:
     def last(self): return self.states[-1] if self.states else None
 
 ctl = da_controller.DictationController(da_config.AppConfig())
+# Step 8's apply_config() rebuilds the engine and, the stub's recognizer key
+# never matching the rebuilt engine's, preloads the model — the real 640 MB
+# one, on a daemon thread that is still inside ONNX Runtime when this script
+# exits, which segfaults in libonnxruntime's static destructors.  A stub
+# engine test loads no model.
+ctl.preload = lambda: None
 eng = StubEngine(); ctl._engine = eng
 ov = FakeOverlay(); ctl.set_overlay(ov)
 
