@@ -36,10 +36,12 @@ What it is not:
   `wl-clipboard`, `ydotool`, `xdg-desktop-portal-kde`. pip builds PyGObject (and pycairo) from
   source inside the venv, which needs `gobject-introspection`, `cairo` and a C toolchain (`base-devel`).
 - ydotool is the fallback chord transport when the portal session is not available:
-  `systemctl --user enable --now ydotool`, and put your user in the `uinput` group (the package ships
-  `80-uinput.rules`, which gives `/dev/uinput` to that group; re-login afterwards).
-- The venv must be **Python 3.12**: sherpa-onnx ships `cp312` wheels, and neither it nor ten-vad has
-  wheels for the system Python 3.14. `uv venv --python 3.12` downloads 3.12 itself.
+  `systemctl --user enable --now ydotool`, and put your user in the group that owns `/dev/uinput`
+  (`ls -l /dev/uinput`; the stock Arch `80-uinput.rules` uses `input`, some setups use a local rule
+  with a `uinput` group). Re-login afterwards.
+- The venv is built with **Python 3.12**, which is what this setup was verified with. sherpa-onnx 1.13.8
+  now also publishes `cp314` wheels and ten-vad is pure Python, so a 3.14 venv may work but is untested
+  here. `uv venv --python 3.12` downloads 3.12 itself.
 - Python packages (`requirements.txt`): `sherpa-onnx>=1.12`, `sounddevice>=0.4`, `pynput>=1.7`,
   `numpy`, `PyGObject`, `ten-vad>=1.0.6`. The model-download CLI additionally needs `requests` and `tqdm`.
 - About 2 GB of RAM for the desktop model while it is loaded; 639 MB of disk for its files.
@@ -275,7 +277,7 @@ The log is `~/.local/share/parakeet-dictation/diagnostics.log`, one event per li
   `transport=none` means neither a portal session nor `ydotool` was available. Check
   `event=portal_session ready=0 stage=...` (`interface`: no RemoteDesktop v2 portal; `start code=1`:
   the prompt was declined, in which case a saved token is forgotten and the prompt returns next start)
-  and `systemctl --user status ydotool` plus membership of `uinput`.
+  and `systemctl --user status ydotool` plus membership of the group that owns `/dev/uinput`.
 - `event=focus_script loaded=0 reason=...`: KWin scripting was not reachable, so every target is
   unknown and `paste_chord` is used everywhere. Ctrl+V into a terminal is harmful (it sends VLNEXT);
   because the text sits on both selections, `"paste_chord": "shift+insert"` is correct in every app.

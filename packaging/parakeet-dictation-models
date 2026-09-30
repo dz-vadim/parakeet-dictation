@@ -1,0 +1,5 @@
+#!/bin/sh
+# Download recognizer model profiles for Parakeet Dictation.
+# Usage: parakeet-dictation-models [desktop|laptop|streaming|all]...
+# Files go to ~/.local/share/parakeet-dictation/models/<profile>/ ($XDG_DATA_HOME is honoured).
+exec /usr/bin/python -m parakeet_dictation.models "$@"

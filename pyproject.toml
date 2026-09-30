@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]  # PEP 639 license expression below
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,14 @@ name = "parakeet-dictation"
 version = "2.0.0"
 description = "On-device push-to-talk voice dictation for KDE Plasma Wayland (sherpa-onnx)"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Environment :: X11 Applications :: GTK",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
 dependencies = [
     "sherpa-onnx>=1.12",
     "sounddevice>=0.4",
@@ -15,6 +23,12 @@ dependencies = [
     "PyGObject",
     "ten-vad>=1.0.6",
 ]
+
+[project.urls]
+Homepage = "https://github.com/dz-vadim/parakeet-dictation"
+Repository = "https://github.com/dz-vadim/parakeet-dictation.git"
+Issues = "https://github.com/dz-vadim/parakeet-dictation/issues"
+Upstream = "https://github.com/danielrosehill/Parakeet-Type-Ubuntu"
 
 [project.scripts]
 parakeet-dictation = "parakeet_dictation.app:main"
