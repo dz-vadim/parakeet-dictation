@@ -2,7 +2,9 @@
 
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -167,14 +169,100 @@ class AppConfig:
         CONFIG_FILE.write_text(json.dumps(asdict(self), indent=2))
 
     @staticmethod
-    def load() -> "AppConfig":
-        if CONFIG_FILE.exists():
-            try:
-                data = json.loads(CONFIG_FILE.read_text())
-                return AppConfig(**{
-                    k: v for k, v in data.items()
-                    if k in AppConfig.__dataclass_fields__
-                })
-            except Exception:
-                pass
-        return AppConfig()
+    def load(log=None) -> "AppConfig":
+        """Read CONFIG_FILE.  Never raises; every problem is reported.
+
+        `log(event, **fields)` receives one `config_error` per problem (the
+        app passes DIAG.log so it lands in diagnostics.log); the same line
+        always goes to stderr as well, since a config problem is something
+        the person at the keyboard has to act on.
+
+        A file that does not parse is moved aside as
+        `config.json.broken-<timestamp>` and the defaults are used — the
+        edit is never lost, and a later save() cannot overwrite it.  A file
+        that parses keeps every key whose value has the right type; a key of
+        the wrong type is dropped (its default applies) and named.  Unknown
+        keys are ignored, as before.
+        """
+        report = _reporter(log)
+        if not CONFIG_FILE.exists():
+            return AppConfig()
+        try:
+            raw = CONFIG_FILE.read_bytes()
+        except OSError as e:
+            report("config_error", reason="unreadable", err=type(e).__name__,
+                   path=CONFIG_FILE.name)
+            return AppConfig()
+        try:
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                raise ValueError(f"top level is {type(data).__name__}, not an object")
+        except ValueError as e:              # JSONDecodeError, UnicodeDecodeError
+            backup = _back_up_broken(CONFIG_FILE)
+            report("config_error", reason="unparseable", err=type(e).__name__,
+                   line=getattr(e, "lineno", 0), col=getattr(e, "colno", 0),
+                   backup=backup.name if backup else "failed",
+                   detail=str(e)[:80])
+            return AppConfig()
+        kwargs = {}
+        for key, value in data.items():
+            field_ = AppConfig.__dataclass_fields__.get(key)
+            if field_ is None:
+                continue
+            ok, value = _coerce(field_.type, value)
+            if not ok:
+                report("config_error", reason="bad_value", key=key,
+                       expected=field_.type.__name__, got=type(value).__name__)
+                continue
+            kwargs[key] = value
+        return AppConfig(**kwargs)
+
+
+def _coerce(field_type, value):
+    """(accepted, value) for one JSON value against a field's annotation.
+
+    JSON has no int/float split, so an int is widened for a float field;
+    everything else must match exactly.  bool is an int subclass in Python,
+    so it is checked first and rejected for numeric fields.
+    """
+    if field_type is bool:
+        return isinstance(value, bool), value
+    if isinstance(value, bool):
+        return False, value
+    if field_type is int:
+        return isinstance(value, int), value
+    if field_type is float:
+        if isinstance(value, (int, float)):
+            return True, float(value)
+        return False, value
+    if field_type is str:
+        return isinstance(value, str), value
+    if field_type is list:
+        return isinstance(value, list), value
+    if field_type is dict:
+        return isinstance(value, dict), value
+    return True, value
+
+
+def _back_up_broken(path: Path):
+    """Move an unparseable config aside.  Returns the backup path, or None."""
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    backup = path.with_name(f"{path.name}.broken-{stamp}")
+    n = 1
+    while backup.exists():
+        backup = path.with_name(f"{path.name}.broken-{stamp}-{n}")
+        n += 1
+    try:
+        os.replace(path, backup)
+    except OSError:
+        return None
+    return backup
+
+
+def _reporter(log):
+    def report(event, **fields):
+        line = " ".join([event] + [f"{k}={v}" for k, v in fields.items()])
+        print(f"WARNING: {line}", file=sys.stderr)
+        if log is not None:
+            log(event, **fields)
+    return report

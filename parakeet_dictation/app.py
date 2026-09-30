@@ -26,7 +26,10 @@ from gi.repository import GLib, Gtk  # noqa: E402
 # ---------------------------------------------------------------------------
 
 def main():
-    config = AppConfig.load()
+    # Problems with the file are reported, not swallowed: a config_error line
+    # in the diagnostics log (and on stderr) says which key was dropped, or
+    # where the unparseable file was backed up to.
+    config = AppConfig.load(log=DIAG.log)
     audio._active_config = config
 
     # Ensure typer is a valid Wayland method
