@@ -186,66 +186,53 @@ class ASREngine:
                 f"Run: python -m parakeet_dictation.models {self._config.model_profile}"
             )
 
-    def _build_offline_recognizer(self):
-        import sherpa_onnx
+    def _recognizer_args(self):
+        """(paths, common): the model files by role and the kwargs every
+        sherpa-onnx builder takes."""
         model_dir = self._get_model_dir()
-        files = self._profile["files"]
-        decoder_type = self._profile.get("decoder_type", "transducer")
-
-        if decoder_type == "transducer":
-            return sherpa_onnx.OfflineRecognizer.from_transducer(
-                encoder=str(model_dir / files["encoder"]["filename"]),
-                decoder=str(model_dir / files["decoder"]["filename"]),
-                joiner=str(model_dir / files["joiner"]["filename"]),
-                tokens=str(model_dir / files["tokens"]["filename"]),
-                num_threads=self._config.num_threads,
-                sample_rate=SAMPLE_RATE,
-                feature_dim=self._profile.get("feature_dim", 128),
-                provider="cpu",
-                model_type=self._profile.get("model_type", "nemo_transducer"),
-                decoding_method="greedy_search",
-            )
-        elif decoder_type == "canary":
-            return sherpa_onnx.OfflineRecognizer.from_nemo_canary(
-                encoder=str(model_dir / files["encoder"]["filename"]),
-                decoder=str(model_dir / files["decoder"]["filename"]),
-                tokens=str(model_dir / files["tokens"]["filename"]),
-                src_lang=self._config.language,
-                tgt_lang=self._config.language,
-                num_threads=self._config.num_threads,
-                sample_rate=SAMPLE_RATE,
-                feature_dim=self._profile.get("feature_dim", 128),
-                provider="cpu",
-                decoding_method="greedy_search",
-            )
-        else:
-            return sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
-                model=str(model_dir / files["model"]["filename"]),
-                tokens=str(model_dir / files["tokens"]["filename"]),
-                num_threads=self._config.num_threads,
-                sample_rate=SAMPLE_RATE,
-                feature_dim=self._profile.get("feature_dim", 128),
-                provider="cpu",
-                decoding_method="greedy_search",
-            )
-
-    def _build_online_recognizer(self):
-        import sherpa_onnx
-        model_dir = self._get_model_dir()
-        files = self._profile["files"]
-        return sherpa_onnx.OnlineRecognizer.from_transducer(
-            encoder=str(model_dir / files["encoder"]["filename"]),
-            decoder=str(model_dir / files["decoder"]["filename"]),
-            joiner=str(model_dir / files["joiner"]["filename"]),
-            tokens=str(model_dir / files["tokens"]["filename"]),
+        paths = {role: str(model_dir / info["filename"])
+                 for role, info in self._profile["files"].items()}
+        common = dict(
+            tokens=paths["tokens"],
             num_threads=self._config.num_threads,
             sample_rate=SAMPLE_RATE,
             feature_dim=self._profile.get("feature_dim", 128),
             provider="cpu",
+        )
+        return paths, common
+
+    def _build_offline_recognizer(self):
+        import sherpa_onnx
+        paths, common = self._recognizer_args()
+        decoder_type = self._profile.get("decoder_type", "transducer")
+
+        if decoder_type == "transducer":
+            return sherpa_onnx.OfflineRecognizer.from_transducer(
+                encoder=paths["encoder"], decoder=paths["decoder"], joiner=paths["joiner"],
+                model_type=self._profile.get("model_type", "nemo_transducer"),
+                decoding_method="greedy_search", **common,
+            )
+        elif decoder_type == "canary":
+            return sherpa_onnx.OfflineRecognizer.from_nemo_canary(
+                encoder=paths["encoder"], decoder=paths["decoder"],
+                src_lang=self._config.language, tgt_lang=self._config.language,
+                decoding_method="greedy_search", **common,
+            )
+        else:
+            return sherpa_onnx.OfflineRecognizer.from_nemo_ctc(
+                model=paths["model"], decoding_method="greedy_search", **common,
+            )
+
+    def _build_online_recognizer(self):
+        import sherpa_onnx
+        paths, common = self._recognizer_args()
+        return sherpa_onnx.OnlineRecognizer.from_transducer(
+            encoder=paths["encoder"], decoder=paths["decoder"], joiner=paths["joiner"],
             enable_endpoint_detection=True,
             rule1_min_trailing_silence=2.4,
             rule2_min_trailing_silence=1.2,
             rule3_min_utterance_length=300,
+            **common,
         )
 
     def _acquire_offline_recognizer(self):
