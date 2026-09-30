@@ -28,6 +28,7 @@ def check(label, ok, detail=""):
     if not ok: FAILS.append(label)
 
 class StubEngine:
+    recognizer_key = ("stub", "", 0, "")   # what apply_config compares across a rebuild
     def __init__(self):
         self.running = False; self.paused = False
         self.starts = 0; self.stops = 0

@@ -177,6 +177,8 @@ class _Completed:
 class StubEngine:
     """The controller's view of an engine, with no thread and no microphone."""
 
+    recognizer_key = ("stub", "", 0, "")
+
     def __init__(self):
         self.running = False
         self.paused = False
@@ -351,9 +353,49 @@ def review2_take_ends_even_if_the_typer_raises():
 
 
 # ---------------------------------------------------------------------------
+# #3  apply_config() must preload when the recognizer key changes, even though
+#     the Settings dialog hands back the very same (mutated) config object.
+# ---------------------------------------------------------------------------
+
+def review3_apply_config_preloads_on_model_switch():
+    print("\n[#3] apply_config preloads after a model switch on the shared config object")
+    ctl, _eng, _ov = make_controller(stub=False)
+    preloads = []
+    ctl.preload = lambda: preloads.append(ctl._engine)
+    cfg = ctl.config                       # what SettingsDialog does: same object
+    cfg.model_profile = "laptop"
+    with redirect_stderr(io.StringIO()):
+        ctl.apply_config(cfg)
+    check("switching the profile on the shared config object triggers a preload",
+          len(preloads) == 1, f"{len(preloads)} preload(s)")
+    check("the preload targets the engine built for the NEW profile",
+          bool(preloads) and preloads[0] is ctl._engine
+          and ctl._engine._profile is ctl.profiles["laptop"])
+    with redirect_stderr(io.StringIO()):
+        ctl.apply_config(cfg)
+    check("saving unchanged settings does not preload again", len(preloads) == 1,
+          f"{len(preloads)} preload(s)")
+    cfg.num_threads = cfg.num_threads + 1
+    with redirect_stderr(io.StringIO()):
+        ctl.apply_config(cfg)
+    check("a thread-count change preloads", len(preloads) == 2, f"{len(preloads)}")
+    cfg.language = "uk"
+    with redirect_stderr(io.StringIO()):
+        ctl.apply_config(cfg)
+    check("a language change preloads", len(preloads) == 3, f"{len(preloads)}")
+    cfg.beep_volume = 0.1
+    with redirect_stderr(io.StringIO()):
+        ctl.apply_config(cfg)
+    check("a change that does not touch the recognizer does not",
+          len(preloads) == 3, f"{len(preloads)}")
+    ctl.shutdown()
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
-            2: review2_take_ends_even_if_the_typer_raises}
+            2: review2_take_ends_even_if_the_typer_raises,
+            3: review3_apply_config_preloads_on_model_switch}
 
 
 def main(argv):

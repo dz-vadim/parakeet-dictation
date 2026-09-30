@@ -502,8 +502,10 @@ class DictationController:
             if self._gesture != GESTURE_IDLE:
                 self._end_take("cancel", "config_change")
             self._overlay_state("hidden")
-        old_profile = self._config.model_profile
-        old_threads = self._config.num_threads
+        # The engine remembers what it was built for; the config object
+        # cannot be asked, because the Settings dialog mutates the one this
+        # controller already holds and hands that same object back.
+        old_key = self._engine.recognizer_key
         new_config.enforce(DIAG.log)      # before save(): the file never holds it
         self._config = new_config
         self._config.save()
@@ -514,7 +516,9 @@ class DictationController:
         # Always rebuild: the engine holds the config object it was created
         # with, so thread-count and VAD changes were silently ignored before.
         self._rebuild_engine()
-        if new_config.model_profile != old_profile or new_config.num_threads != old_threads:
+        if self._engine.recognizer_key != old_key:
+            # Otherwise the next take pays the model load while the user is
+            # already speaking.
             self.preload()
 
     def _on_final_text(self, text: str):

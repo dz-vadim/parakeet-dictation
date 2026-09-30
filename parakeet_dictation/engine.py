@@ -126,6 +126,12 @@ class ASREngine:
                  on_capture_start=None, on_level=None, on_preview=None):
         self._config = config
         self._profile = profile
+        # What the recognizer is keyed on, fixed when the engine is built.
+        # The controller rebuilds the engine on every settings save and
+        # compares this across the rebuild to decide whether a preload is
+        # due: the config object itself is the same mutated instance both
+        # times, so it can say nothing about what changed.
+        self._model_key = (config.model_profile, config.num_threads, config.language)
         self._on_text = on_text
         self._on_partial = on_partial
         self._on_error = on_error
@@ -150,6 +156,14 @@ class ASREngine:
         # already waits for this; wait_drained() is the belt to that brace.
         self._drained = threading.Event()
         self._drained.set()
+
+    @property
+    def recognizer_key(self) -> tuple:
+        """(kind, profile, threads, language): what the recognizer cache is
+        keyed on, as this engine was built.  Two engines with equal keys share
+        a loaded model; a different key means the next take pays a load."""
+        kind = "online" if self._profile.get("streaming", False) else "offline"
+        return (kind,) + self._model_key
 
     def _get_model_dir(self) -> Path:
         return MODELS_DIR / self._config.model_profile
