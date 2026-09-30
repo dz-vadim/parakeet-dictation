@@ -819,11 +819,53 @@ def defect9_thread_default():
 
 
 # ---------------------------------------------------------------------------
+# #10 focus.py logs the window class when it changes, not on every activation.
+# ---------------------------------------------------------------------------
+
+def defect10_focus_log_on_change():
+    print("\n[#10] focus logged on class change only")
+    from gi.repository import GLib
+    from parakeet_dictation import focus as da_focus
+    da_focus.DIAG = TEST_DIAG
+    tracker = da_focus.FocusTracker(enabled=True)
+
+    class Invocation:
+        def return_value(self, _v):
+            pass
+
+    def activate(cls, caption="doc"):
+        tracker._on_report(None, None, None, None, None,
+                           GLib.Variant("(ssss)", (cls, cls, caption, "4242")),
+                           Invocation())
+
+    before = len(diag_lines())
+    activate("kitty", "a")
+    activate("kitty", "b")            # alt-tab between two kitty windows
+    activate("kitty", "c")
+    activate("org.kde.kwrite")
+    activate("org.kde.kwrite")
+    activate("kitty")
+    activate("")                      # desktop / no window
+    activate("")
+    logged = [l.split("cls=")[1].split()[0]
+              for l in diag_lines()[before:] if "event=focus " in l]
+    check("one focus line per class change",
+          logged == ["kitty", "org.kde.kwrite", "kitty", "unknown"], str(logged))
+    check("the cached snapshot still follows every activation",
+          tracker._latest is not None and tracker._latest.resource_class == "")
+    activate("kitty", "z")
+    check("a caption change on the same class is tracked but not logged",
+          tracker._latest.caption == "z"
+          and sum(1 for l in diag_lines()[before:] if "event=focus " in l) == 5)
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = [defect2_config_load, defect3_engine_stop,
             defect4_single_instance, defect5_missing_helper_named,
             defect6_clipboard_verbatim, defect7_overlay_fallback_honest,
-            defect8_model_hint, defect9_thread_default]
+            defect8_model_hint, defect9_thread_default,
+            defect10_focus_log_on_change]
 
 
 def main():
