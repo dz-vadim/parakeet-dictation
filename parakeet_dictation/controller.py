@@ -396,12 +396,25 @@ class DictationController:
             DIAG.log("finish_take_stale", take=take, current=self._take_seq)
             return GLib.SOURCE_REMOVE
         self._typer.reset_partial()
-        self._flush_take_text()
         emitted = self._take_texts
-        self._end_take("success" if emitted else "no_speech", reason)
-        self._overlay_state("success" if emitted else "hidden")
-        if self._status_callback:
-            self._status_callback("")
+        outcome = "success" if emitted else "no_speech"
+        pill = "success" if emitted else "hidden"
+        message = ""
+        try:
+            self._flush_take_text()
+        except Exception as e:
+            # Whatever escaped the typer: say so on the pill and in the log.
+            # The take still ends below — left at STOPPING, every later key
+            # press was ignored until the app was restarted.
+            outcome, pill = "insert_error", "error"
+            message = "Insertion failed — text was not pasted"
+            DIAG.log("take_insert_error", err=type(e).__name__, take=take)
+            print(f"ERROR: insertion failed: {type(e).__name__}: {e}", file=sys.stderr)
+        finally:
+            self._end_take(outcome, reason)
+            self._overlay_state(pill, message)
+            if self._status_callback:
+                self._status_callback("")
         return GLib.SOURCE_REMOVE
 
     def _flush_take_text(self):

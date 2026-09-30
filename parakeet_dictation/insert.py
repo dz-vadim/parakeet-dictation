@@ -526,6 +526,17 @@ class TextTyper:
                             self._method, self._on_failure)
         except subprocess.TimeoutExpired:
             pass
+        except OSError as e:
+            # E2BIG from an oversized argv, EACCES/EPERM on the helper, ...:
+            # reported the same way as a failed paste, never raised, because
+            # an exception out of here used to end the caller's take at
+            # STOPPING for good.
+            exe = os.path.basename(str(getattr(e, "filename", None)
+                                       or ("wtype" if self._method == "wtype" else "wl-copy")))
+            DIAG.log("insert_failed", err=type(e).__name__, errno=e.errno or 0, exe=exe)
+            print(f"ERROR: {exe}: {e.strerror or e}", file=sys.stderr)
+            if self._on_failure:
+                self._on_failure(f"Insertion failed: {exe}: {e.strerror or e}")
 
     def _clipboard_paste(self, text: str, target=None):
         """Stage *text* on both selections, press the chord, restore later."""
@@ -547,8 +558,16 @@ class TextTyper:
                 self._clip_gen += 1   # invalidates any restore already waiting
                 gen = self._clip_gen
                 saved = self._clip_saved
-            _run_quiet(["wl-copy", "--", text])
-            _run_quiet(["wl-copy", "--primary", "--", text])
+            try:
+                _run_quiet(["wl-copy", "--", text])
+                _run_quiet(["wl-copy", "--primary", "--", text])
+            except OSError:
+                # Nothing (or only half) was staged: the user's clipboard is
+                # still theirs, so there is nothing to put back later — and
+                # the next paste must read it afresh.
+                self._clip_restore_pending = False
+                self._clip_saved = None
+                raise
             time.sleep(STAGE_SETTLE_S)
             ok = self._paste(chord, detect, cls)
             if not ok:

@@ -134,9 +134,226 @@ def review1_vad_speech_floor():
           vad.flush() is True and not vad.empty() and len(vad.front.samples) == 3 * HOP)
 
 
+# --- controller harness: stub engine, fake overlay, a pumped GLib main loop ---
+# (goes right after the #1 section in tests/test_review.py)
+
+from parakeet_dictation import (controller as da_controller, engine as da_engine,  # noqa: E402
+                                insert as da_insert)
+from gi.repository import GLib  # noqa: E402
+
+for _mod in (da_controller, da_engine, da_insert):
+    _mod.DIAG = TEST_DIAG
+
+# apply_config() calls AppConfig.save(): point that at scratch, never at ~/.config.
+_CFG_TMP = Path(tempfile.mkdtemp(prefix="parakeet-review-"))
+da_config.CONFIG_DIR = _CFG_TMP
+da_config.CONFIG_FILE = _CFG_TMP / "config.json"
+
+
+class GLibInline:
+    """idle_add runs the callback at once, on the calling thread (engine tests)."""
+    SOURCE_CONTINUE = True
+    SOURCE_REMOVE = False
+    PRIORITY_DEFAULT = 0
+
+    @staticmethod
+    def idle_add(fn, *args):
+        fn(*args)
+        return 0
+
+
+da_engine.GLib = GLibInline
+da_engine.play_beep_start = lambda *a, **k: None
+da_engine.play_beep_stop = lambda *a, **k: None
+da_engine.play_beep_pause = lambda *a, **k: None
+da_engine.resolve_audio_device = lambda _value: None
+
+
+class _Completed:
+    def __init__(self, rc=0, out=b""):
+        self.returncode, self.stdout, self.stderr = rc, out, b""
+
+
+class StubEngine:
+    """The controller's view of an engine, with no thread and no microphone."""
+
+    def __init__(self):
+        self.running = False
+        self.paused = False
+        self.starts = 0
+        self.stops = 0
+
+    @property
+    def is_running(self):
+        return self.running
+
+    @property
+    def is_paused(self):
+        return self.paused
+
+    def start(self):
+        self.starts += 1
+
+    def stop(self):
+        self.stops += 1
+        self.running = False
+
+    def wait_drained(self, timeout=60.0):
+        return True
+
+    def pause(self):
+        pass
+
+
+class FakeOverlay:
+    def __init__(self):
+        self.states = []
+
+    def set_state(self, state, message=""):
+        self.states.append((state, message))
+
+    def push_level(self, *_a):
+        pass
+
+    def capture_started(self):
+        pass
+
+    def set_capture_probe(self, _p):
+        pass
+
+    def apply_config(self, _c):
+        pass
+
+    def preview_append(self, _t):
+        pass
+
+    def preview_hypothesis(self, _t):
+        pass
+
+    def preview_reset(self):
+        pass
+
+
+def make_controller(stub=True, **cfg):
+    config = da_config.AppConfig(**cfg)
+    with redirect_stderr(io.StringIO()):
+        ctl = da_controller.DictationController(config)
+    eng = None
+    if stub:
+        eng = StubEngine()
+        ctl._engine = eng
+    ov = FakeOverlay()
+    ctl.set_overlay(ov)
+    return ctl, eng, ov
+
+
+def capture_up(ctl, eng):
+    """What the engine's idle_add does once the input stream is open."""
+    eng.running = True
+    ctl._on_capture_start()
+
+
+def pump(ms):
+    loop = GLib.MainLoop()
+    GLib.timeout_add(ms, lambda: (loop.quit(), False)[1])
+    loop.run()
+
+
+def pump_until(cond, timeout_ms=3000, step_ms=20):
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    while not cond() and time.monotonic() < deadline:
+        pump(step_ms)
+    return cond()
+
+
+def wait_typer(typer, timeout=5.0):
+    """Block until the typer has nothing queued (a no-op for a synchronous typer)."""
+    wait = getattr(typer, "wait_idle", None)
+    if callable(wait):
+        wait(timeout)
+
+
+def events(lines, name):
+    return [l for l in lines if f"event={name} " in l or l.endswith(f"event={name}")]
+
+
+# ---------------------------------------------------------------------------
+# #2  An exception in the typer must not leave the gesture at STOPPING: the
+#     take ends whatever the insertion did, and an OSError from a helper
+#     (E2BIG, EPERM) is reported through on_failure instead of escaping.
 # ---------------------------------------------------------------------------
 
-SECTIONS = {1: review1_vad_speech_floor}
+def review2_take_ends_even_if_the_typer_raises():
+    print("\n[#2] the take ends even when the typer raises")
+
+    # --- the typer itself: an OSError from wl-copy is reported, not raised --
+    saved = (da_insert.subprocess.run, da_insert.shutil.which, da_insert.portal_keyboard)
+    da_insert.portal_keyboard = lambda: None
+    da_insert.shutil.which = lambda n: f"/usr/bin/{n}" if n == "ydotool" else None
+
+    def run(args, **_kw):
+        if args[0] == "wl-copy":
+            raise OSError(7, "Argument list too long", "wl-copy")
+        return _Completed(0, b"")
+
+    da_insert.subprocess.run = run
+    failures = []
+    typer = da_insert.TextTyper("clipboard", on_failure=failures.append)
+    before = len(diag_lines())
+    raised = None
+    try:
+        with redirect_stderr(io.StringIO()):
+            typer.type_text("hello")
+            wait_typer(typer)
+    except Exception as e:
+        raised = e
+    finally:
+        (da_insert.subprocess.run, da_insert.shutil.which,
+         da_insert.portal_keyboard) = saved
+    check("an OSError from the staging helper does not escape type_text",
+          raised is None, repr(raised))
+    check("it is reported through on_failure, naming the helper",
+          bool(failures) and "wl-copy" in failures[-1], str(failures))
+    check("and logged as insert_failed with the error type",
+          any("event=insert_failed" in l and "err=OSError" in l
+              for l in diag_lines()[before:]),
+          str([l.split("event=")[1][:50] for l in diag_lines()[before:]]))
+
+    # --- the controller: whatever escapes the typer, the take still ends ----
+    class RaisingTyper(da_insert.TextTyper):
+        def _type_raw(self, text, target=None):
+            raise PermissionError(13, "Permission denied", "/dev/uinput")
+
+    ctl, eng, _ov = make_controller()
+    ctl._typer = RaisingTyper("clipboard")
+    ctl.hold_press()
+    capture_up(ctl, eng)
+    ctl._on_final_text("some words")
+    ctl.hold_release()
+    check("release puts the gesture at stopping", ctl.gesture == "stopping", ctl.gesture)
+    before = len(diag_lines())
+    with redirect_stderr(io.StringIO()):
+        ended = pump_until(lambda: ctl.gesture == "idle", 4000)
+    check("the gesture is back at idle after the typer raised", ended, ctl.gesture)
+    check("take_end was logged for that take",
+          any("event=take_end" in l and "take=1" in l for l in diag_lines()[before:]))
+    ctl.hold_press()
+    check("the next press opens a new take (dictation is not dead)",
+          ctl.gesture == "starting" and eng.starts == 2,
+          f"gesture={ctl.gesture} starts={eng.starts}")
+    capture_up(ctl, eng)
+    ctl.hold_release()
+    with redirect_stderr(io.StringIO()):
+        pump_until(lambda: ctl.gesture == "idle", 4000)
+    check("and that take ends too", ctl.gesture == "idle" and eng.stops == 2,
+          f"gesture={ctl.gesture} stops={eng.stops}")
+    ctl.shutdown()
+
+
+# ---------------------------------------------------------------------------
+
+SECTIONS = {1: review1_vad_speech_floor,
+            2: review2_take_ends_even_if_the_typer_raises}
 
 
 def main(argv):
