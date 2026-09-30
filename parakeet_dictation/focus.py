@@ -49,8 +49,10 @@ class FocusTracker:
     SCRIPT_IFACE = "org.kde.kwin.Script"
     PLUGIN = "parakeet-dictation-focus"
     SCRIPT = Path(__file__).resolve().parent / "data" / "focus.js"
-    # How often the timer re-verifies that KWin still holds the script.
-    RECHECK_S = 10.0
+    # How often the timer re-verifies that KWin still holds the script.  The
+    # name watcher covers the common case (a KWin restart) at once; this is
+    # the slow backstop for a script unloaded by other means.
+    RECHECK_S = 60.0
 
     def __init__(self, enabled: bool = True):
         self.enabled = bool(enabled)
