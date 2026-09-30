@@ -875,6 +875,41 @@ def review10_coalescer_disabled_counts_closed_blocks():
 
 
 # ---------------------------------------------------------------------------
+# #11 test_defects.py defect 4 runs main() against a scratch config, and puts
+#     the suite's diagnostics flag back afterwards.  Checked from outside, in
+#     a subprocess, with a sentinel standing in for the user's config file.
+# ---------------------------------------------------------------------------
+
+def review11_test_defects_runs_main_on_a_scratch_config():
+    print("\n[#11] test_defects defect 4 never reads the user's config")
+    import subprocess
+    with tempfile.TemporaryDirectory(prefix="parakeet-review-") as tmp:
+        sentinel = Path(tmp) / "user-config.json"
+        sentinel.write_text('{"diagnostics": false, "num_threads": 1}')
+        probe = (
+            "import sys, pathlib\n"
+            f"sys.path.insert(0, {str(HERE)!r})\n"
+            "import test_defects as td\n"
+            "from parakeet_dictation import config as da_config\n"
+            f"sentinel = pathlib.Path({str(sentinel)!r})\n"
+            "da_config.CONFIG_DIR, da_config.CONFIG_FILE = sentinel.parent, sentinel\n"
+            "mtime = sentinel.stat().st_mtime_ns\n"
+            "td.defect4_single_instance()\n"
+            "print('ENABLED', td.TEST_DIAG._enabled)\n"
+            "print('SENTINEL_UNTOUCHED', sentinel.exists() and sentinel.stat().st_mtime_ns == mtime)\n"
+            "print('FAILURES', len(td.FAILURES))\n")
+        proc = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
+                              timeout=120, cwd=HERE.parent)
+        out = proc.stdout
+        check("the defect-4 section itself passes", "FAILURES 0" in out,
+              (proc.stderr or out).strip()[-300:])
+        check("main() did not read the user's config (diagnostics=false would have "
+              "switched the suite's log off)", "ENABLED True" in out,
+              [l for l in out.splitlines() if l.startswith("ENABLED")])
+        check("the user's config file was never touched", "SENTINEL_UNTOUCHED True" in out)
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
             2: review2_take_ends_even_if_the_typer_raises,
@@ -885,7 +920,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             7: review7_press_while_stopping_is_queued,
             8: review8_cli_download_is_atomic,
             9: review9_preview_keeps_going_beyond_the_window,
-            10: review10_coalescer_disabled_counts_closed_blocks}
+            10: review10_coalescer_disabled_counts_closed_blocks,
+            11: review11_test_defects_runs_main_on_a_scratch_config}
 
 
 def main(argv):

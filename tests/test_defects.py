@@ -263,8 +263,17 @@ def _wait_decoding(timeout=5.0):
 
 def defect3_engine_stop():
     print("\n[#3] ASREngine.stop(): capture stopped, decoder drained, starts queued")
+    # Section A shortens the drain bound; whatever happens in there, every
+    # later section (and suite) must get the shipping value back.
+    default_bound = da_engine.ASREngine.DRAIN_TIMEOUT_S
+    try:
+        _defect3_sections()
+    finally:
+        da_engine.ASREngine.DRAIN_TIMEOUT_S = default_bound
+
+
+def _defect3_sections():
     one_second = np.zeros(SR, dtype=np.float32)
-    default_bound = getattr(da_engine.ASREngine, "DRAIN_TIMEOUT_S", None)
 
     # --- A. a decode longer than the bound: stop() gives up on time and the
     #        late result is dropped, never delivered into the next take ------
@@ -395,9 +404,6 @@ def defect3_engine_stop():
           not engine.is_running and not engine._thread.is_alive())
     check("the first session's text still landed once", len(texts) == 1)
 
-    if default_bound is not None:
-        da_engine.ASREngine.DRAIN_TIMEOUT_S = default_bound
-
 
 # ---------------------------------------------------------------------------
 # #4  Single instance: the second copy must see the bus name taken and exit.
@@ -447,6 +453,17 @@ def defect4_single_instance():
         def must_not_build(*_a, **_k):
             raise AssertionError("main() built the controller with the name taken")
 
+        # main() loads the config before it looks at the lock: point it at a
+        # scratch file, never the user's (a broken real file would have been
+        # moved aside), and put back what it sets on the way — the DIAG
+        # enabled flag (the suite's own log!) and audio's config reference.
+        tmp = tempfile.TemporaryDirectory(prefix="parakeet-cfg-")
+        saved_cfg = (da_config.CONFIG_DIR, da_config.CONFIG_FILE)
+        saved_diag = TEST_DIAG._enabled
+        saved_audio_cfg = da_audio._active_config
+        da_config.CONFIG_DIR = Path(tmp.name)
+        da_config.CONFIG_FILE = Path(tmp.name) / "config.json"
+        da_config.CONFIG_FILE.write_text(json.dumps({"hotkey_hold": "Meta+Shift+F12"}))
         da_app.DictationController = must_not_build
         if lock_cls is not None:
             da_app.InstanceLock = lambda name=MAIN_NAME: lock_cls(name)
@@ -461,7 +478,15 @@ def defect4_single_instance():
             da_app.DictationController = sentinel
             if lock_cls is not None:
                 da_app.InstanceLock = lock_cls
+            read_cfg = da_audio._active_config
+            da_audio._active_config = saved_audio_cfg
+            TEST_DIAG.set_enabled(saved_diag)
+            da_config.CONFIG_DIR, da_config.CONFIG_FILE = saved_cfg
+            tmp.cleanup()
         check("main() returns 0 without building the app", rc == 0, str(rc))
+        check("main() read the scratch config, not the user's",
+              getattr(read_cfg, "hotkey_hold", None) == "Meta+Shift+F12",
+              repr(getattr(read_cfg, "hotkey_hold", None)))
         check("and says so in one line, naming the running pid",
               "already running" in out.getvalue()
               and f"pid {os.getpid()}" in out.getvalue()
