@@ -60,6 +60,7 @@ class FocusTracker:
         self._watch_id = 0
         self._timer_id = 0
         self._loaded = False
+        self._loading = False          # a _load chain is in flight
         self._lock = threading.Lock()
         self._latest = None
         self._last_logged_cls = None   # so alt-tabbing does not flood the log
@@ -127,32 +128,69 @@ class FocusTracker:
         if not loaded and self._bus is not None:
             self._load("stale")
 
-    def _load(self, reason: str) -> bool:
+    def _load(self, reason: str):
         """(Re)load and run the script.  Idempotent: a stale copy left behind by
         a previous instance is unloaded first, since KWin refuses a duplicate
-        plugin name."""
+        plugin name.
+
+        Asynchronous, like _recheck: three round trips to KWin on the GTK
+        loop would otherwise stall startup for as long as KWin takes.  One
+        chain at a time — the name watcher fires as soon as it is armed, and
+        a second chain would unload the first one's script under it.
+        """
+        if self._loading:
+            return
+        self._loading = True
         t0 = time.monotonic()
-        try:
-            try:
-                self._call(self.SCRIPTING_PATH, self.SCRIPTING_IFACE, "unloadScript",
-                           GLib.Variant("(s)", (self.PLUGIN,)), "(b)")
-            except GLib.Error:
-                pass
-            script_id = self._call(self.SCRIPTING_PATH, self.SCRIPTING_IFACE, "loadScript",
-                                   GLib.Variant("(ss)", (str(self.SCRIPT), self.PLUGIN)),
-                                   "(i)").unpack()[0]
-            if script_id < 0:
-                raise GLib.Error(f"loadScript returned {script_id}")
-            self._call(f"{self.SCRIPTING_PATH}/Script{script_id}", self.SCRIPT_IFACE,
-                       "run", None)
-        except GLib.Error as e:
+
+        def call(path, iface, method, params, reply_type, callback):
+            self._bus.call(self.KWIN, path, iface, method, params,
+                           GLib.VariantType.new(reply_type) if reply_type else None,
+                           Gio.DBusCallFlags.NONE, 2000, None, callback)
+
+        def fail(e):
+            self._loading = False
             self._loaded = False
             DIAG.log("focus_script", loaded=False, reason=reason, err=type(e).__name__)
-            return False
-        self._loaded = True
-        DIAG.log("focus_script", loaded=True, reason=reason,
-                 ms=(time.monotonic() - t0) * 1000)
-        return True
+
+        def on_unloaded(bus, result, *_user):
+            try:
+                bus.call_finish(result)
+            except GLib.Error:
+                pass                    # nothing stale to unload
+            if self._bus is None:
+                self._loading = False
+                return
+            call(self.SCRIPTING_PATH, self.SCRIPTING_IFACE, "loadScript",
+                 GLib.Variant("(ss)", (str(self.SCRIPT), self.PLUGIN)), "(i)", on_loaded)
+
+        def on_loaded(bus, result, *_user):
+            try:
+                script_id = bus.call_finish(result).unpack()[0]
+                if script_id < 0:
+                    raise GLib.Error(f"loadScript returned {script_id}")
+            except GLib.Error as e:
+                fail(e)
+                return
+            if self._bus is None:
+                self._loading = False
+                return
+            call(f"{self.SCRIPTING_PATH}/Script{script_id}", self.SCRIPT_IFACE,
+                 "run", None, None, on_run)
+
+        def on_run(bus, result, *_user):
+            try:
+                bus.call_finish(result)
+            except GLib.Error as e:
+                fail(e)
+                return
+            self._loading = False
+            self._loaded = True
+            DIAG.log("focus_script", loaded=True, reason=reason,
+                     ms=(time.monotonic() - t0) * 1000)
+
+        call(self.SCRIPTING_PATH, self.SCRIPTING_IFACE, "unloadScript",
+             GLib.Variant("(s)", (self.PLUGIN,)), "(b)", on_unloaded)
 
     def _on_kwin_appeared(self, _conn, _name, _owner):
         if not self._loaded:
@@ -167,7 +205,8 @@ class FocusTracker:
     # -- public API ---------------------------------------------------------
 
     def start(self) -> bool:
-        """Export the report object and load the script.  Returns loaded."""
+        """Export the report object and start loading the script.  Returns
+        whether the report object is up; the load reports through the log."""
         if not self.enabled:
             DIAG.log("focus_script", loaded=False, reason="disabled")
             return False
@@ -178,19 +217,20 @@ class FocusTracker:
             DIAG.log("focus_script", loaded=False, reason="dbus", err=type(e).__name__)
             self._bus = None
             return False
-        loaded = self._load("start")
+        self._load("start")
         # Reload after a KWin restart — the script does not survive one.
         self._watch_id = Gio.bus_watch_name_on_connection(
             self._bus, self.KWIN, Gio.BusNameWatcherFlags.NONE,
             self._on_kwin_appeared, self._on_kwin_vanished)
         # And notice a script that went away without KWin going with it.
         self._timer_id = GLib.timeout_add_seconds(int(self.RECHECK_S), self._recheck)
-        return loaded
+        return True
 
     def reload(self) -> bool:
         if not self.enabled or self._bus is None:
             return False
-        return self._load("reload")
+        self._load("reload")
+        return True
 
     def snapshot(self):
         """The latest report, or None when the focused window is unknown.

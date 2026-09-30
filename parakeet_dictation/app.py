@@ -53,11 +53,16 @@ def main():
              focus_script=config.focus_script)
 
     controller = DictationController(config)
+    # Warm the model first: the ~1.6 s load runs on its own thread while the
+    # rest of the UI is built, instead of after it, and the first dictation
+    # start no longer pays it while the user is already speaking.
+    controller.preload()
+
     overlay = PillOverlay(config)
     controller.set_overlay(overlay)
 
     # Which window is focused, straight from KWin, so the paste chord can be
-    # chosen per app.  Loaded before the main loop; reports arrive on it.
+    # chosen per app.  Loading starts before the main loop; reports arrive on it.
     focus = FocusTracker(enabled=config.focus_script)
     focus.start()
     controller.set_focus_probe(focus.snapshot)
@@ -65,9 +70,6 @@ def main():
     # "Remote Control" prompt must never land in the middle of an insertion.
     if config.paste_transport != "ydotool" and config.typer != "ydotool":
         insert.portal_keyboard().start_async()
-    # Warm the model now; otherwise the first dictation start pays the ~1.6 s
-    # load while the user is already speaking.
-    controller.preload()
 
     # tray referenced in hotkey lambdas — assigned after creation
     tray = None
