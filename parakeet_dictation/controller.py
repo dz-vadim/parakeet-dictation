@@ -49,6 +49,9 @@ def overlay_error_message(msg: str) -> str:
 
 class DictationController:
     def __init__(self, config: AppConfig):
+        # Whatever built this config, the combination that cannot run on KWin
+        # (hold + per_segment, see AppConfig.enforce) does not get to run.
+        config.enforce(DIAG.log)
         self._config = config
         self._typer = self._make_typer(config)
         self._profiles_data = load_model_profiles()
@@ -488,6 +491,7 @@ class DictationController:
             self._overlay_state("hidden")
         old_profile = self._config.model_profile
         old_threads = self._config.num_threads
+        new_config.enforce(DIAG.log)      # before save(): the file never holds it
         self._config = new_config
         self._config.save()
         self._typer = self._make_typer(new_config)

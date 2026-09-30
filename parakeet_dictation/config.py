@@ -69,9 +69,10 @@ class AppConfig:
     #   "wtype" (needs virtual-keyboard protocol), "ydotool" (needs daemon+uinput)
     typer: str = "clipboard"
 
-    # Hotkey mode: "toggle" (one key), "start_stop" (separate keys) or
-    # "hold" (true push-to-talk: dictate only while the key is down)
-    hotkey_mode: str = "toggle"
+    # Hotkey mode: "hold" (true push-to-talk: dictate only while the key is
+    # down — what this app is built and tested for), "toggle" (one key) or
+    # "start_stop" (separate keys)
+    hotkey_mode: str = "hold"
 
     # Night mode — suppress beeps between these hours (24h format)
     night_mode: bool = True
@@ -121,13 +122,15 @@ class AppConfig:
     # target is "unknown" and `paste_chord` is used everywhere.
     focus_script: bool = True
 
-    # A take usually breaks into several VAD segments.  "per_segment" inserts
-    # each one as it decodes, so text keeps flowing while the key is held;
-    # "end_of_take" holds them all and inserts once when the take ends, which
-    # costs one clipboard write, one paste and one undo step for the whole take
-    # but shows nothing until you let go.  Per-segment is only tolerable
-    # because `vad_min_silence` no longer cuts on a thinking pause.
-    insert_mode: str = "per_segment"
+    # A take usually breaks into several VAD segments.  "end_of_take" holds
+    # them all and inserts once when the take ends: one clipboard write, one
+    # paste and one undo step for the whole take, with the live preview
+    # showing the text meanwhile.  "per_segment" inserts each one as it
+    # decodes — but NOT under hold mode: a paste chord pressed while the
+    # push-to-talk key is held makes kglobalaccel report that key released
+    # (Ctrl, V, Ctrl+V and Shift+Insert alone each did, on this Plasma), which
+    # ends the take mid-sentence.  enforce() refuses that combination.
+    insert_mode: str = "end_of_take"
 
     # Structured diagnostics log (never contains transcripts or device names)
     diagnostics: bool = True
@@ -141,8 +144,9 @@ class AppConfig:
     # Push-to-talk binding, in KDE/Qt shortcut syntax rather than pynput's.
     # Hold mode registers this with kglobalaccel directly (see
     # KGlobalAccelHotkey) because that is the only route that reports the key
-    # coming back UP.
-    hotkey_hold: str = "Meta+Alt+D"
+    # coming back UP.  Meta+Z was verified free on this Plasma; Meta+Alt+D
+    # collided with a leftover .desktop shortcut.
+    hotkey_hold: str = "Meta+Z"
 
     # Pill overlay — compact always-visible-while-active status capsule
     overlay: bool = True
@@ -171,6 +175,24 @@ class AppConfig:
     def save(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         CONFIG_FILE.write_text(json.dumps(asdict(self), indent=2))
+
+    def enforce(self, log=None) -> list:
+        """Apply the invariants a config must satisfy to run; returns the keys
+        it changed.  Reported like load() reports: stderr, plus `log`.
+
+        hold + per_segment is not a preference but a broken state on KWin
+        (see `insert_mode`): the combination is forced to end_of_take here,
+        on load, in the controller and on every settings save, so it cannot
+        run whichever way the config object was made.
+        """
+        report = _reporter(log)
+        forced = []
+        if self.hotkey_mode == "hold" and self.insert_mode != "end_of_take":
+            self.insert_mode = "end_of_take"
+            forced.append("insert_mode")
+            report("config_forced", key="insert_mode", value="end_of_take",
+                   reason="hold_mode")
+        return forced
 
     @staticmethod
     def load(log=None) -> "AppConfig":
@@ -219,7 +241,9 @@ class AppConfig:
                        expected=field_.type.__name__, got=type(value).__name__)
                 continue
             kwargs[key] = value
-        return AppConfig(**kwargs)
+        config = AppConfig(**kwargs)
+        config.enforce(log)
+        return config
 
 
 def _coerce(field_type, value):

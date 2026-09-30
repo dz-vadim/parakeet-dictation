@@ -288,10 +288,16 @@ def run_take(audio, release_at_audio_s, insert_mode, label, preview=True,
     PRIMARY["text"] = USER_PRIMARY
     before = len(diag_lines())
 
-    config = da_config.AppConfig(hotkey_mode="hold", insert_mode=insert_mode,
-                          preview=preview, coalesce_target_s=coalesce,
-                          preview_interval_s=preview_interval,
-                          normalize=normalize)
+    # Per-segment insertion cannot run under hold mode (AppConfig.enforce: a
+    # paste chord while the key is held reads as its release), so the
+    # per-segment scenarios are configured as a toggle session.  The gesture
+    # calls below (hold_press / hold_release) do not consult hotkey_mode.
+    config = da_config.AppConfig(hotkey_mode="hold" if insert_mode == "end_of_take"
+                                 else "toggle",
+                                 insert_mode=insert_mode,
+                                 preview=preview, coalesce_target_s=coalesce,
+                                 preview_interval_s=preview_interval,
+                                 normalize=normalize)
     ctl = da_controller.DictationController(config)
     overlay = FakeOverlay(config)
     ctl.set_overlay(overlay)

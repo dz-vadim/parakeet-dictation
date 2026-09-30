@@ -414,6 +414,8 @@ class SettingsDialog(Gtk.Dialog):
             self._mode_startstop.set_active(True)
         elif self._config.hotkey_mode == "hold":
             self._mode_hold.set_active(True)
+        # Fires on both the way in and the way out of hold mode.
+        self._mode_hold.connect("toggled", self._reflect_hold_mode)
         box.pack_start(self._mode_toggle, False, False, 0)
         box.pack_start(self._mode_startstop, False, False, 4)
         box.pack_start(self._mode_hold, False, False, 4)
@@ -538,12 +540,9 @@ class SettingsDialog(Gtk.Dialog):
             self._config.insert_mode
             if self._config.insert_mode in ("per_segment", "end_of_take")
             else "per_segment")
-        self._insert_mode_combo.set_tooltip_text(
-            "Per phrase keeps the text flowing while you hold the key.  Once "
-            "per take gives one paste and one undo step for the whole take, "
-            "but you see nothing until you let go.")
         hbox_ins.pack_start(self._insert_mode_combo, False, False, 0)
         box.pack_start(hbox_ins, False, False, 0)
+        self._reflect_hold_mode()
 
         sep0 = Gtk.Separator()
         sep0.set_margin_top(4)
@@ -668,6 +667,28 @@ class SettingsDialog(Gtk.Dialog):
         box.pack_start(save_btn, False, False, 0)
 
         return box
+
+    INSERT_MODE_TIP = (
+        "Per phrase keeps the text flowing while you hold the key.  Once "
+        "per take gives one paste and one undo step for the whole take, "
+        "but you see nothing until you let go.")
+    INSERT_MODE_HOLD_TIP = (
+        "Push-to-talk always inserts once, when you let the key go: a paste "
+        "while the key is held makes KWin report the key released, which "
+        "would end the take mid-sentence.  The live preview shows the text "
+        "meanwhile.")
+
+    def _reflect_hold_mode(self, *_args):
+        """Pin the insert mode to end_of_take while push-to-talk is selected —
+        the same rule AppConfig.enforce applies to whatever gets saved."""
+        combo = getattr(self, "_insert_mode_combo", None)
+        if combo is None:
+            return          # the General tab is built after the Hotkeys tab
+        hold = self._mode_hold.get_active()
+        if hold:
+            combo.set_active_id("end_of_take")
+        combo.set_sensitive(not hold)
+        combo.set_tooltip_text(self.INSERT_MODE_HOLD_TIP if hold else self.INSERT_MODE_TIP)
 
     def _save_general(self, _btn):
         self._config.audio_device = self._mic_combo.get_active_id() or ""

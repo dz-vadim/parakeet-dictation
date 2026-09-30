@@ -860,12 +860,106 @@ def defect10_focus_log_on_change():
 
 
 # ---------------------------------------------------------------------------
+# #11 Defaults match the configuration the app is built and tested for, and
+#     hold + per_segment — a broken state on KWin — cannot run.
+# ---------------------------------------------------------------------------
+
+def defect11_hold_mode_defaults_and_guard():
+    print("\n[#11] defaults are the tested configuration; hold + per_segment cannot run")
+    from parakeet_dictation import controller as da_controller
+    da_controller.DIAG = TEST_DIAG
+    cfg = da_config.AppConfig()
+    check("default hotkey_mode is hold", cfg.hotkey_mode == "hold", cfg.hotkey_mode)
+    check("default hotkey_hold is Meta+Z", cfg.hotkey_hold == "Meta+Z", cfg.hotkey_hold)
+    check("default insert_mode is end_of_take", cfg.insert_mode == "end_of_take",
+          cfg.insert_mode)
+
+    with tempfile.TemporaryDirectory(prefix="parakeet-cfg-") as tmp:
+        saved = (da_config.CONFIG_DIR, da_config.CONFIG_FILE)
+        da_config.CONFIG_DIR = Path(tmp)
+        da_config.CONFIG_FILE = Path(tmp) / "config.json"
+        try:
+            events = []
+
+            def log(ev, **f):
+                events.append((ev, f))
+
+            da_config.CONFIG_FILE.write_text(json.dumps(
+                {"hotkey_mode": "hold", "insert_mode": "per_segment"}))
+            with redirect_stderr(io.StringIO()):
+                cfg = da_config.AppConfig.load(log=log)
+            check("hold + per_segment is forced to end_of_take on load",
+                  cfg.insert_mode == "end_of_take", cfg.insert_mode)
+            check("config_forced logged with key and reason",
+                  any(ev == "config_forced" and f.get("key") == "insert_mode"
+                      and f.get("reason") == "hold_mode" for ev, f in events), str(events))
+
+            events.clear()
+            da_config.CONFIG_FILE.write_text(json.dumps(
+                {"hotkey_mode": "toggle", "insert_mode": "per_segment",
+                 "hotkey_hold": "Meta+Alt+D"}))
+            cfg = da_config.AppConfig.load(log=log)
+            check("explicit values outside the forbidden combination are kept",
+                  cfg.hotkey_mode == "toggle" and cfg.insert_mode == "per_segment"
+                  and cfg.hotkey_hold == "Meta+Alt+D" and not events,
+                  f"{cfg.hotkey_mode} {cfg.insert_mode} {cfg.hotkey_hold} {events}")
+
+            # However the config object was made, the controller will not run it.
+            before = len(diag_lines())
+            with redirect_stderr(io.StringIO()):
+                ctl = da_controller.DictationController(
+                    da_config.AppConfig(hotkey_mode="hold", insert_mode="per_segment"))
+            check("the controller forces end_of_take at construction",
+                  ctl.config.insert_mode == "end_of_take" and ctl._insert_at_end)
+            check("and logs config_forced",
+                  any("event=config_forced" in l and "key=insert_mode" in l
+                      and "reason=hold_mode" in l for l in diag_lines()[before:]))
+            before = len(diag_lines())
+            with redirect_stderr(io.StringIO()):
+                ctl.apply_config(
+                    da_config.AppConfig(hotkey_mode="hold", insert_mode="per_segment"))
+            on_disk = json.loads(da_config.CONFIG_FILE.read_text())
+            check("apply_config forces it too and saves the corrected file",
+                  ctl.config.insert_mode == "end_of_take"
+                  and on_disk["insert_mode"] == "end_of_take", str(on_disk.get("insert_mode")))
+            check("and logs it again",
+                  any("event=config_forced" in l for l in diag_lines()[before:]))
+            ctl.shutdown()
+        finally:
+            da_config.CONFIG_DIR, da_config.CONFIG_FILE = saved
+
+    # The Settings dialog shows the forced value and will not offer the other.
+    from parakeet_dictation import models as da_models
+    from parakeet_dictation.ui import windows as da_windows
+    dlg = da_windows.SettingsDialog(
+        da_config.AppConfig(hotkey_mode="hold", insert_mode="per_segment"),
+        da_models.load_model_profiles(), lambda _c: None)
+    try:
+        combo = getattr(dlg, "_insert_mode_combo", None)
+        check("the Settings dialog shows end_of_take for hold mode",
+              combo is not None and combo.get_active_id() == "end_of_take",
+              combo.get_active_id() if combo is not None else "no control")
+        check("and the control is disabled while hold mode is selected",
+              combo is not None and not combo.get_sensitive())
+        dlg._mode_toggle.set_active(True)
+        check("choosing toggle mode re-enables the control",
+              combo is not None and combo.get_sensitive())
+        dlg._mode_hold.set_active(True)
+        check("choosing hold mode disables it again and selects end_of_take",
+              combo is not None and not combo.get_sensitive()
+              and combo.get_active_id() == "end_of_take")
+    finally:
+        dlg.destroy()
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = [defect2_config_load, defect3_engine_stop,
             defect4_single_instance, defect5_missing_helper_named,
             defect6_clipboard_verbatim, defect7_overlay_fallback_honest,
             defect8_model_hint, defect9_thread_default,
-            defect10_focus_log_on_change]
+            defect10_focus_log_on_change,
+            defect11_hold_mode_defaults_and_guard]
 
 
 def main():
