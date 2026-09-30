@@ -23,4 +23,4 @@ parakeet-dictation = "parakeet_dictation.app:main"
 include = ["parakeet_dictation*"]
 
 [tool.setuptools.package-data]
-parakeet_dictation = ["data/models.json"]
+parakeet_dictation = ["data/models.json", "data/focus.js"]

@@ -66,17 +66,47 @@ class DictationController:
         self._take_inserts = 0
         self._take_stop_t0 = 0.0
         self._last_insert_t = 0.0
+        # Focused-window probe (FocusTracker.snapshot) and the snapshot taken
+        # the moment the take ended — the paste target is whatever was focused
+        # when the user let go, not whatever is focused once the decode lands.
+        self._focus_probe = None
+        self._focus_at_release = None
         self._rebuild_engine()
 
-    @staticmethod
-    def _make_typer(config: AppConfig) -> TextTyper:
+    def _make_typer(self, config: AppConfig) -> TextTyper:
         return TextTyper(
             config.typer,
             keep_on_clipboard=config.keep_on_clipboard,
             paste_chord=config.paste_chord,
             terminal_paste_chord=config.terminal_paste_chord,
             terminal_window_classes=config.terminal_window_classes,
+            no_ctrl_v_classes=config.no_ctrl_v_classes,
+            paste_overrides=config.paste_overrides,
+            paste_transport=config.paste_transport,
+            on_failure=self._on_paste_failed,
         )
+
+    def set_focus_probe(self, probe):
+        """`probe()` returns a FocusSnapshot (or None) for the active window."""
+        self._focus_probe = probe
+
+    def _snapshot_focus(self, when: str):
+        if not self._focus_probe:
+            return None
+        try:
+            snap = self._focus_probe()
+        except Exception as e:   # a probe must never break a take
+            DIAG.log("focus_probe_failed", err=type(e).__name__, at=when)
+            return None
+        DIAG.log("focus_snapshot", at=when, take=self._take_seq,
+                 target=(getattr(snap, "resource_class", "") or "unknown"))
+        return snap
+
+    def _on_paste_failed(self, message: str):
+        """Called by the typer, possibly off the main loop, when no transport
+        could press the chord.  The text is left on the clipboard; say so."""
+        print(f"WARNING: {message}", file=sys.stderr)
+        GLib.idle_add(self._overlay_state, "error", message)
 
     def preload(self):
         """Load and warm the model in the background so the first take is fast."""
@@ -217,6 +247,7 @@ class DictationController:
             DIAG.log("stop_ignored", reason="not_recording", take=self._take_seq)
             return
         self._cancel_tail()
+        self._focus_at_release = self._snapshot_focus("stop")
         self._enter(GESTURE_STOPPING, "explicit")
         self._overlay_state("processing")
         self._stop_engine_async("explicit")
@@ -263,6 +294,10 @@ class DictationController:
         DIAG.log("hold_release", decision=decision, state=self._gesture,
                  take=self._take_seq,
                  after_insert_ms=(since_insert if 0 <= since_insert < 1000 else -1))
+        if decision in (STOP_PROCEED, STOP_DEFER):
+            # The target is fixed HERE, at the release: the decode still has
+            # a few hundred ms to run and the user may already be elsewhere.
+            self._focus_at_release = self._snapshot_focus("release")
         if decision == STOP_PROCEED:
             # UI first, capture second: the pill must not wait out the tail.
             self._overlay_state("processing")
@@ -390,10 +425,17 @@ class DictationController:
         self._last_insert_t = time.monotonic()
         waited_ms = ((time.monotonic() - self._take_stop_t0) * 1000
                      if self._take_stop_t0 else 0.0)
+        # After the release the target is the release-time snapshot; a
+        # per-segment insertion while the key is still down goes to whatever
+        # is focused right now.
+        target = self._focus_at_release
+        if target is None and not self._take_stop_t0:
+            target = self._snapshot_focus("insert")
         DIAG.log("take_insert", mode=self._config.insert_mode,
                  index=self._take_inserts, chars=len(text), segments=segments,
-                 waited_ms=waited_ms, take=self._take_seq)
-        self._typer.type_text(text)
+                 waited_ms=waited_ms, take=self._take_seq,
+                 target=(getattr(target, "resource_class", "") or "unknown"))
+        self._typer.type_text(text, target=target)
         if self._status_callback:
             self._status_callback("")
 
@@ -423,6 +465,7 @@ class DictationController:
         self._take_inserts = 0
         self._take_stop_t0 = 0.0
         self._last_insert_t = 0.0
+        self._focus_at_release = None
         self._enter(GESTURE_IDLE, outcome)
 
     def pause(self):

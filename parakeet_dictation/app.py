@@ -5,13 +5,14 @@ Supports multiple ASR model profiles (Parakeet, Canary, Nemotron) with
 configurable hotkeys and VAD-segmented or true streaming transcription.
 """
 
-import shutil
 import signal
 
 from . import audio
+from . import insert
 from .config import APP_NAME, AppConfig
 from .controller import DictationController
 from .diagnostics import DIAG
+from .focus import FocusTracker
 from .hotkeys import HotkeyManager
 from .models import _any_model_downloaded
 from .ui.overlay import PillOverlay
@@ -35,12 +36,22 @@ def main():
     DIAG.set_enabled(config.diagnostics)
     DIAG.log("app_start", profile=config.model_profile,
              threads=config.num_threads, typer=config.typer,
-             paste_chord=config.paste_chord,
-             kdotool=bool(shutil.which("kdotool")))
+             paste_chord=config.paste_chord, transport=config.paste_transport,
+             focus_script=config.focus_script)
 
     controller = DictationController(config)
     overlay = PillOverlay(config)
     controller.set_overlay(overlay)
+
+    # Which window is focused, straight from KWin, so the paste chord can be
+    # chosen per app.  Loaded before the main loop; reports arrive on it.
+    focus = FocusTracker(enabled=config.focus_script)
+    focus.start()
+    controller.set_focus_probe(focus.snapshot)
+    # The portal session is opened NOW, not at the first paste: its one-time
+    # "Remote Control" prompt must never land in the middle of an insertion.
+    if config.paste_transport != "ydotool" and config.typer != "ydotool":
+        insert.portal_keyboard().start_async()
     # Warm the model now; otherwise the first dictation start pays the ~1.6 s
     # load while the user is already speaking.
     controller.preload()
@@ -108,4 +119,6 @@ def main():
 
     Gtk.main()
     hotkey_mgr.stop()
+    focus.stop()                       # unload the KWin script we loaded
+    insert.portal_keyboard().close()
     overlay.shutdown()

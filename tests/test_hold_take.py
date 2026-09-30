@@ -41,7 +41,8 @@ sys.path.insert(0, str(HERE.parent))
 
 from parakeet_dictation import (audio as da_audio, config as da_config,  # noqa: E402
                                 controller as da_controller, diagnostics as da_diagnostics,
-                                engine as da_engine, insert as da_insert, models as da_models)
+                                engine as da_engine, focus as da_focus, insert as da_insert,
+                                models as da_models)
 from parakeet_dictation.ui import overlay as da_overlay  # noqa: E402
 from gi.repository import GLib  # noqa: E402
 
@@ -110,8 +111,14 @@ def quiet(seconds):
 # ---------------------------------------------------------------------------
 
 CLIP = {"text": ""}
+PRIMARY = {"text": ""}
 USER_CLIPBOARD = "USER-CLIPBOARD-BEFORE-DICTATION"
+USER_PRIMARY = "USER-PRIMARY-SELECTION"
 PASTES = []        # (t, text) that the focused window would have received
+CHORDS = []        # the chord pressed for each of those pastes, in order
+YDOTOOL_FAIL = {"n": 0}   # make the next n `ydotool key` calls exit non-zero
+
+_KEYCODES_TO_CHORD = {v: k for k, v in da_insert._CHORD_KEYCODES.items()}
 
 
 class _Completed:
@@ -122,17 +129,23 @@ class _Completed:
 def fake_run(args, **_kw):
     args = list(args)
     if args[0] == "wl-copy":
-        CLIP["text"] = "" if "--clear" in args else args[-1]
+        sel = PRIMARY if ("--primary" in args or "-p" in args) else CLIP
+        sel["text"] = "" if "--clear" in args else args[-1]
     elif args[0] == "wl-paste":
-        return _Completed(0, CLIP["text"].encode())
+        sel = PRIMARY if ("--primary" in args or "-p" in args) else CLIP
+        return _Completed(0, sel["text"].encode())
     elif args[0] == "ydotool" and len(args) > 1 and args[1] == "key":
+        if YDOTOOL_FAIL["n"] > 0:
+            YDOTOOL_FAIL["n"] -= 1
+            return _Completed(1)
         PASTES.append((time.monotonic(), CLIP["text"]))
+        CHORDS.append(_KEYCODES_TO_CHORD.get(tuple(args[2:]), "?"))
     return _Completed()
 
 
 da_insert.subprocess.run = fake_run
 da_insert.shutil.which = lambda name: f"/usr/bin/{name}" if name == "ydotool" else None
-da_insert._kdotool_path = None          # no focused-window probe: use the configured chord
+da_insert.portal_keyboard = lambda: None   # never open a portal session from a test
 da_engine.play_beep_start = lambda *a, **k: None
 da_engine.play_beep_stop = lambda *a, **k: None
 da_engine.play_beep_pause = lambda *a, **k: None
@@ -245,7 +258,8 @@ class FakeOverlay:
 # ---------------------------------------------------------------------------
 
 def run_take(audio, release_at_audio_s, insert_mode, label, preview=True,
-             coalesce=0.0, preview_interval=0.0, normalize=True):
+             coalesce=0.0, preview_interval=0.0, normalize=True,
+             focus=None, after_release=None):
     """Hold the key, release it after `release_at_audio_s` of audio, report.
 
     The release is triggered off how much of the script the microphone has
@@ -257,10 +271,16 @@ def run_take(audio, release_at_audio_s, insert_mode, label, preview=True,
     insertion per phrase, and coalescing deliberately changes that timing.
     Their shipping values are exercised in part5_coalescing() and
     part6_preview_pass() instead.
+
+    `focus` stands in for FocusTracker.snapshot; `after_release` runs the
+    instant hold_release() returns — the place to move the "focus" elsewhere
+    while the decode is still finishing.
     """
     print(f"\n{label}")
     PASTES.clear()
+    CHORDS.clear()
     CLIP["text"] = USER_CLIPBOARD
+    PRIMARY["text"] = USER_PRIMARY
     before = len(diag_lines())
 
     config = da_config.AppConfig(hotkey_mode="hold", insert_mode=insert_mode,
@@ -270,6 +290,8 @@ def run_take(audio, release_at_audio_s, insert_mode, label, preview=True,
     ctl = da_controller.DictationController(config)
     overlay = FakeOverlay(config)
     ctl.set_overlay(overlay)
+    if focus is not None:
+        ctl.set_focus_probe(focus)
 
     mic = {}
 
@@ -305,6 +327,8 @@ def run_take(audio, release_at_audio_s, insert_mode, label, preview=True,
         marks["release"] = time.monotonic()
         marks["delivered"] = mic["m"].delivered
         ctl.hold_release()
+        if after_release is not None:
+            after_release()
         return False
 
     real_tail = ctl._on_release_tail
@@ -426,6 +450,142 @@ def part1_vad():
           f"{len(vad.front.samples)} samples")
     vad = da_audio.TenVadDetector(min_silence_duration=0.8)
     check("flush() with nothing pending is a no-op", vad.flush() is False)
+
+
+# ---------------------------------------------------------------------------
+# Chord choice, newline safety and the transport ladder
+# ---------------------------------------------------------------------------
+
+def snap(cls):
+    """A FocusSnapshot for a scratch window of class `cls`."""
+    return da_focus.FocusSnapshot(cls, cls, "scratch", 4242, time.monotonic())
+
+
+def part2_insertion():
+    print("\n[2b] choose_chord: the chord follows the focused window's class")
+    cfg = da_config.AppConfig()
+    choose = da_insert.choose_chord
+    for cls in ("kitty", "Alacritty", "org.kde.konsole", "konsole", "yakuake",
+                "foot", "com.mitchellh.ghostty", "XTerm", "st", "gnome-terminal-server"):
+        check(f"terminal {cls} -> Ctrl+Shift+V", choose(cls, cfg) == ("ctrl+shift+v", "focus"),
+              str(choose(cls, cfg)))
+    check("matching is case-insensitive (KITTY)", choose("KITTY", cfg)[0] == "ctrl+shift+v")
+    check("emacs -> Shift+Insert", choose("emacs", cfg) == ("shift+insert", "focus"))
+    check("Emacs -> Shift+Insert", choose("Emacs", cfg) == ("shift+insert", "focus"))
+    for cls in ("chromium", "com.microsoft.VSCode", "org.kde.kwrite", "python3"):
+        check(f"{cls} -> Ctrl+V", choose(cls, cfg) == ("ctrl+v", "focus"), str(choose(cls, cfg)))
+    check("unknown (None) -> Ctrl+V, detect=none", choose(None, cfg) == ("ctrl+v", "none"))
+    check("unknown ('') -> Ctrl+V, detect=none", choose("", cfg) == ("ctrl+v", "none"))
+    over = da_config.AppConfig(paste_overrides={"kitty": "shift+insert",
+                                                "Chromium": "ctrl+shift+v"})
+    check("an override beats the terminal table",
+          choose("kitty", over) == ("shift+insert", "config"), str(choose("kitty", over)))
+    check("an override beats the default, case-insensitively",
+          choose("chromium", over) == ("ctrl+shift+v", "config"))
+    bad = da_config.AppConfig(paste_overrides={"kitty": "xf86paste"})
+    check("an override naming a chord that does not exist is ignored",
+          choose("kitty", bad) == ("ctrl+shift+v", "focus"))
+    compat = da_config.AppConfig(paste_chord="ctrl+shift+v", terminal_paste_chord="shift+insert",
+                                 terminal_window_classes=["myterm"])
+    check("legacy paste_chord still sets the default for unknown windows",
+          choose(None, compat)[0] == "ctrl+shift+v")
+    check("legacy terminal_paste_chord + terminal_window_classes still apply",
+          choose("MyTerm", compat) == ("shift+insert", "focus"))
+    check("a class not in the legacy list gets the default",
+          choose("kitty", compat)[0] == "ctrl+shift+v")
+    check("the config default terminal list carries every class the research saw",
+          {"kitty", "Alacritty", "org.kde.konsole"} <= set(cfg.terminal_window_classes))
+
+    print("\n[2c] newline safety at the staging layer")
+    prep = da_insert.prepare_for_target
+    check("a trailing newline is stripped everywhere", prep("hello\n", False) == "hello")
+    check("a trailing CRLF is stripped everywhere", prep("hello\r\n", False) == "hello")
+    check("several trailing newlines are stripped", prep("hello\n\n\r\n", False) == "hello")
+    check("an internal newline survives for a non-terminal", prep("a\nb\n", False) == "a\nb")
+    check("for a terminal internal newlines collapse to spaces",
+          prep("a\nb\r\nc\n", True) == "a b c", repr(prep("a\nb\r\nc\n", True)))
+    check("a bare CR is a newline too, for a terminal", prep("a\rb", True) == "a b")
+    check("the trailing space the typer adds is kept", prep("x ", True) == "x ")
+    check("type_text's own sanitiser still keeps Enter out of every app",
+          da_insert.TextTyper._sanitize("a\nb\n") == "a b")
+
+    print("\n[2d] TextTyper: staging on both selections, chord per target, restore")
+    PASTES.clear(); CHORDS.clear()
+    CLIP["text"] = USER_CLIPBOARD
+    PRIMARY["text"] = USER_PRIMARY
+    before = len(diag_lines())
+    typer = da_insert.TextTyper("clipboard", keep_on_clipboard=False)
+    typer.type_text("hello", target=snap("kitty"))
+    check("the clipboard held the text when the chord went out",
+          PASTES and PASTES[-1][1] == "hello ", str(PASTES[-1:]))
+    check("and so did the primary selection (what Shift+Insert reads in kitty)",
+          PRIMARY["text"] == "hello ", repr(PRIMARY["text"]))
+    check("a kitty target got Ctrl+Shift+V", CHORDS[-1:] == ["ctrl+shift+v"], str(CHORDS))
+    typer.type_text("hi", target=snap("emacs"))
+    check("an emacs target got Shift+Insert", CHORDS[-1:] == ["shift+insert"], str(CHORDS))
+    typer.type_text("hi", target=snap("org.kde.kwrite"))
+    check("a kwrite target got Ctrl+V", CHORDS[-1:] == ["ctrl+v"], str(CHORDS))
+    typer.type_text("hi", target=None)
+    check("no target at all got the default Ctrl+V", CHORDS[-1:] == ["ctrl+v"], str(CHORDS))
+    typer.type_text("hi", target="Alacritty")
+    check("a bare class string works as a target too", CHORDS[-1:] == ["ctrl+shift+v"])
+    lines = diag_lines()[before:]
+    check("paste logged with chord, transport, target and detect",
+          any("event=paste " in l and "chord=ctrl+shift+v" in l and "transport=ydotool" in l
+              and "target=kitty" in l and "detect=focus" in l and "ok=1" in l for l in lines),
+          str([l for l in lines if "event=paste " in l][:1]))
+    check("an unknown target is logged as such",
+          any("event=paste " in l and "target=unknown" in l and "detect=none" in l
+              for l in lines))
+    time.sleep(0.8)   # outlive the restore timers
+    check("the user's clipboard was put back", CLIP["text"] == USER_CLIPBOARD,
+          repr(CLIP["text"]))
+    check("the user's primary selection was put back", PRIMARY["text"] == USER_PRIMARY,
+          repr(PRIMARY["text"]))
+
+    print("\n[2e] the transport ladder: retry with Shift+Insert, then fail loudly")
+    PASTES.clear(); CHORDS.clear()
+    CLIP["text"] = USER_CLIPBOARD
+    failures = []
+    typer = da_insert.TextTyper("clipboard", on_failure=failures.append)
+    YDOTOOL_FAIL["n"] = 1                    # the first chord press errors out
+    before = len(diag_lines())
+    typer.type_text("retry me", target=snap("chromium"))
+    lines = diag_lines()[before:]
+    check("after a transport failure the retry is Shift+Insert",
+          CHORDS == ["shift+insert"], str(CHORDS))
+    check("both attempts logged, the first not ok, the second ok",
+          any("event=paste " in l and "attempt=1" in l and "ok=0" in l and "chord=ctrl+v" in l
+              for l in lines)
+          and any("event=paste " in l and "attempt=2" in l and "ok=1" in l
+                  and "chord=shift+insert" in l for l in lines),
+          str([l.split("event=")[1] for l in lines if "event=paste" in l]))
+    check("no failure surfaced: the retry delivered it", not failures, str(failures))
+    time.sleep(0.8)
+    check("clipboard restored after the successful retry", CLIP["text"] == USER_CLIPBOARD)
+
+    YDOTOOL_FAIL["n"] = 2                    # the chord AND the retry error out
+    before = len(diag_lines())
+    typer.type_text("stranded", target=snap("chromium"))
+    lines = diag_lines()[before:]
+    check("paste_failed logged when the retry fails too",
+          any("event=paste_failed" in l and "target=chromium" in l for l in lines))
+    check("the failure is surfaced with the recovery hint",
+          failures and "clipboard" in failures[-1].lower() and "Ctrl+V" in failures[-1],
+          str(failures))
+    time.sleep(0.8)
+    check("the text is LEFT on the clipboard — nothing restored over it",
+          CLIP["text"] == "stranded ", repr(CLIP["text"]))
+    check("and the restore bookkeeping is released for the next take",
+          typer._clip_restore_pending is False and typer._clip_saved is None)
+    YDOTOOL_FAIL["n"] = 0
+    PASTES.clear(); CHORDS.clear()
+    CLIP["text"] = USER_CLIPBOARD
+    typer.type_text("next take", target=snap("chromium"))
+    check("the next insertion saves the user's clipboard afresh",
+          PASTES and PASTES[-1][1] == "next take ")
+    time.sleep(0.8)
+    check("and restores it", CLIP["text"] == USER_CLIPBOARD, repr(CLIP["text"]))
 
 
 # ---------------------------------------------------------------------------
@@ -987,6 +1147,7 @@ def main():
     print(f"model ready in {(time.perf_counter() - t0) * 1000:.0f} ms")
 
     part1_vad()
+    part2_insertion()
 
     # ---- the user's scenario, in the shipping default (per_segment) --------
     take1 = np.concatenate([SPEECH_A, quiet(0.5), SPEECH_B, SPEECH_C])
@@ -1085,6 +1246,50 @@ def main():
     check("and flipped to success only once the text had landed",
           bool(pastes) and overlay_next_after(overlay, pastes[-1][0]) == "success",
           str([s for _t, s, _m in overlay.states]))
+    check("with no focus probe the chord is the configured default",
+          list(CHORDS) == ["ctrl+v"], str(CHORDS))
+    check("and the insertion is logged against an unknown target",
+          any("event=take_insert" in l and "target=unknown" in l for l in lines))
+
+    # ---- the paste target is fixed at the RELEASE, not at the insertion ---
+    focus = {"now": snap("kitty")}
+
+    def alt_tab_away():
+        # The user lets go over a terminal and is already in an editor by the
+        # time the decode of the flushed tail lands.
+        focus["now"] = snap("org.kde.kwrite")
+
+    marks, pastes, lines, overlay = run_take(
+        take2, release2, "end_of_take",
+        "[5b] focus at release = kitty, focus at insertion = kwrite",
+        focus=lambda: focus["now"], after_release=alt_tab_away)
+    check("exactly one insertion", len(pastes) == 1, f"{len(pastes)}")
+    check("it landed after the release, when the probe already said kwrite",
+          bool(pastes) and pastes[0][0] > marks["release"]
+          and focus["now"].resource_class == "org.kde.kwrite")
+    check("the chord is the TERMINAL's — chosen from the release-time snapshot",
+          list(CHORDS) == ["ctrl+shift+v"], str(CHORDS))
+    check("focus_snapshot logged at the release with the terminal's class",
+          any("event=focus_snapshot" in l and "at=release" in l and "target=kitty" in l
+              for l in lines))
+    check("take_insert names the release-time target",
+          any("event=take_insert" in l and "target=kitty" in l for l in lines))
+    check("the paste went to kitty with Ctrl+Shift+V, detect=focus",
+          any("event=paste " in l and "target=kitty" in l and "chord=ctrl+shift+v" in l
+              and "detect=focus" in l for l in lines),
+          str([l.split("event=")[1] for l in lines if "event=paste " in l]))
+    check("nothing was pasted against the later window",
+          not any("event=paste " in l and "kwrite" in l for l in lines))
+    check("the snapshot is dropped with the take",
+          not any("focus_snapshot" in l and "at=insert" in l for l in lines))
+
+    focus["now"] = snap("org.kde.kwrite")
+    marks, pastes, lines, overlay = run_take(
+        take2, release2, "end_of_take",
+        "[5c] control: focus at release = kwrite", focus=lambda: focus["now"])
+    check("the editor target gets Ctrl+V", list(CHORDS) == ["ctrl+v"], str(CHORDS))
+    check("logged against org.kde.kwrite",
+          any("event=paste " in l and "target=org.kde.kwrite" in l for l in lines))
 
     preview_unit_checks()
     preview_take_checks()

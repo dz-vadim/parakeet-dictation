@@ -85,18 +85,35 @@ class AppConfig:
 
     # Text insertion.  `keep_on_clipboard` leaves the dictated text in the
     # clipboard instead of restoring what was there before the paste.
-    # `paste_chord` is one of "ctrl+v", "ctrl+shift+v", "shift+insert":
-    # terminals ignore Ctrl+V and need Ctrl+Shift+V, and KDE Wayland gives no
-    # way to read the focused window unless kdotool is installed, so set this
-    # to "ctrl+shift+v" if you dictate mainly into a terminal.
+    # The chord is chosen per focused window (see insert.choose_chord):
+    # `paste_chord` for everything unknown or unlisted, `terminal_paste_chord`
+    # for `terminal_window_classes` (Ctrl+V is destructive in a terminal),
+    # Shift+Insert for `no_ctrl_v_classes` (Emacs), and `paste_overrides`
+    # ({window class: chord}) wins over all of the tables.  Chords are
+    # "ctrl+v", "ctrl+shift+v" or "shift+insert"; classes are KWin
+    # resourceClass values, matched case-insensitively.
     keep_on_clipboard: bool = False
     paste_chord: str = "ctrl+v"
     terminal_paste_chord: str = "ctrl+shift+v"
     terminal_window_classes: list = field(default_factory=lambda: [
-        "kitty", "konsole", "org.kde.konsole", "alacritty", "Alacritty",
-        "foot", "footclient", "xterm", "wezterm", "org.wezfurlong.wezterm",
-        "com.mitchellh.ghostty", "gnome-terminal-server", "terminator",
+        "kitty", "Alacritty", "alacritty", "org.kde.konsole", "konsole",
+        "yakuake", "foot", "footclient", "org.wezfurlong.wezterm", "wezterm",
+        "com.mitchellh.ghostty", "XTerm", "xterm", "st", "contour",
+        "gnome-terminal-server", "terminator", "com.gexperts.Tilix",
     ])
+    no_ctrl_v_classes: list = field(default_factory=lambda: ["emacs", "Emacs"])
+    paste_overrides: dict = field(default_factory=dict)
+
+    # How the chord is pressed: "portal" (xdg-desktop-portal RemoteDesktop,
+    # layout independent, one "Remote Control" prompt ever), "ydotool"
+    # (uinput keycodes, needs ydotoold), or "auto" — the portal when it is
+    # available, ydotool otherwise.
+    paste_transport: str = "auto"
+
+    # Learn the focused window from a resident KWin script so the chord can
+    # be chosen per app.  Off, or on a compositor without KWin scripting, the
+    # target is "unknown" and `paste_chord` is used everywhere.
+    focus_script: bool = True
 
     # A take usually breaks into several VAD segments.  "per_segment" inserts
     # each one as it decodes, so text keeps flowing while the key is held;
