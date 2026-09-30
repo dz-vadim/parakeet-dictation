@@ -170,7 +170,7 @@ def run_session(engine, blocks, vad, overflow_every=0):
         return holder["stream"]
 
     da_engine.sd.InputStream = factory
-    engine._run_offline()
+    engine._run_offline(engine._stop_event)
     return holder["stream"]
 
 
@@ -331,7 +331,7 @@ def main():
 
     da_engine.sd.InputStream = factory
     t0 = time.perf_counter()
-    engine._run_offline()
+    engine._run_offline(engine._stop_event)
     elapsed = time.perf_counter() - t0
     words = sum(len(t.split()) for t in emitted)
     print(f"  {len(full)/SR:.1f}s audio -> {len(emitted)} blocks with text, "

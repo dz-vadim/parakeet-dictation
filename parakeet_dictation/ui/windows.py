@@ -892,7 +892,7 @@ class MainWindow(Gtk.Window):
             target = "streaming"
         else:
             # Restore previous non-streaming model
-            target = getattr(self, "_non_streaming_model", "desktop")
+            target = self._non_streaming_model
 
         if not _is_model_downloaded(target, self._controller.profiles):
             # Can't switch — revert checkbox

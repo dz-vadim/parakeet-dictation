@@ -154,15 +154,6 @@ class KGlobalAccelHotkey:
                  conflict=owner or "none")
         return owner
 
-    def shortcut_infos(self) -> list:
-        """What System Settings will list for this component."""
-        if not self._bus:
-            return []
-        path = self._call(self.ROOT_PATH, self.ROOT_IFACE, "getComponent",
-                          GLib.Variant("(s)", (self.COMPONENT,)), "(o)").unpack()[0]
-        return list(self._call(path, self.COMPONENT_IFACE, "allShortcutInfos",
-                               None, "(a(ssssssaiai))").unpack()[0])
-
     def _handle_press(self, _conn, _sender, _path, _iface, _signal, params):
         if params.unpack()[1] == self.ACTION:
             self._on_press()
@@ -204,10 +195,6 @@ class HotkeyManager:
         self._on_hold_release = on_hold_release or (lambda: None)
         self._listener = None
         self._hold = None
-
-    @property
-    def hold(self) -> "KGlobalAccelHotkey":
-        return self._hold
 
     def start(self) -> str:
         """Bind the configured hotkeys.  Returns "" or a problem to show.

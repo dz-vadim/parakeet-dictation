@@ -227,12 +227,6 @@ class FocusTracker:
         self._timer_id = GLib.timeout_add_seconds(int(self.RECHECK_S), self._recheck)
         return True
 
-    def reload(self) -> bool:
-        if not self.enabled or self._bus is None:
-            return False
-        self._load("reload")
-        return True
-
     def snapshot(self):
         """The latest report, or None when the focused window is unknown.
 

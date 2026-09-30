@@ -366,9 +366,7 @@ class ASREngine:
                 rms = 0.0
             GLib.idle_add(self._on_level, rms, speech)
 
-    def _run(self, stop_event=None, previous=None):
-        if stop_event is None:
-            stop_event = self._stop_event
+    def _run(self, stop_event, previous=None):
         if previous is not None:
             # Queued behind a session that is still draining: the microphone
             # and the decoder are handed over, never shared.
@@ -406,9 +404,7 @@ class ASREngine:
             self._settle()
             play_beep_stop(self._config.beep_volume)
 
-    def _run_offline(self, stop_event=None):
-        if stop_event is None:
-            stop_event = self._stop_event
+    def _run_offline(self, stop_event):
         vad = self._build_vad()
         coalescer = _BlockCoalescer(self._config.coalesce_target_s)
         # Held around every mutation of the VAD and the coalescer, so the
@@ -664,7 +660,7 @@ class ASREngine:
             DIAG.log("normalize", **info)
         return text, decode_ms
 
-    def _preview_worker(self, vad, coalescer, live_lock, stats, stop_event=None):
+    def _preview_worker(self, vad, coalescer, live_lock, stats, stop_event):
         """Decode the still-open audio on a timer so the panel shows something.
 
         DISPLAY ONLY.  What this returns is a hypothesis about audio that has
@@ -686,8 +682,6 @@ class ASREngine:
         thread pool spinning between calls).  A 2-3 s cadence costs a fraction
         of that — see `preview_interval_s`.
         """
-        if stop_event is None:
-            stop_event = self._stop_event
         interval = max(float(self._config.preview_interval_s), 0.2)
         window = int(max(float(self._config.preview_window_s), 1.0) * SAMPLE_RATE)
         try:
@@ -764,9 +758,7 @@ class ASREngine:
             showing = True
             GLib.idle_add(self._on_preview, text)
 
-    def _run_streaming(self, stop_event=None):
-        if stop_event is None:
-            stop_event = self._stop_event
+    def _run_streaming(self, stop_event):
         recognizer, _ = self._acquire_online_recognizer()
         with INFERENCE_LOCK:
             stream = recognizer.create_stream()

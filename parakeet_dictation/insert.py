@@ -90,8 +90,6 @@ _CHORD_KEYSYMS = {
                          (_KS_SHIFT_L, 0)),
 }
 
-CHORDS = tuple(_CHORD_KEYCODES)
-
 # The terminal and no-Ctrl+V class tables live in config.py
 # (DEFAULT_TERMINAL_CLASSES, DEFAULT_NO_CTRL_V_CLASSES): the config carries
 # the user's editable copy, and this module reads whichever it is handed.

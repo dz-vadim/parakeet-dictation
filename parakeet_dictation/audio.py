@@ -394,10 +394,6 @@ class _BlockCoalescer:
     def enabled(self) -> bool:
         return self._target > 0
 
-    @property
-    def pending_samples(self) -> int:
-        return self._samples
-
     def add(self, segment) -> list:
         """Take one closed VAD segment.  Returns the blocks now ready to decode.
 
