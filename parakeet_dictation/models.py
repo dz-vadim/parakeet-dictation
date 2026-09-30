@@ -177,18 +177,21 @@ def _download_all_models(profiles_data: dict, on_progress, on_done):
 # ---------------------------------------------------------------------------
 
 def download_file(url: str, dest: Path):
-    import requests
+    """CLI download with a progress bar, through the same atomic path the
+    GUI uses: the bytes land in `<dest>.part` and are renamed only once the
+    transfer is complete.  Writing `dest` directly, as this did, let a
+    truncated download pass the exists()/size checks and fail later inside
+    sherpa-onnx."""
     from tqdm import tqdm
 
-    resp = requests.get(url, stream=True, timeout=(15, 60))
-    resp.raise_for_status()
-    total = int(resp.headers.get("content-length", 0))
-    with open(dest, "wb") as f, tqdm(
-        total=total, unit="B", unit_scale=True, desc=dest.name
-    ) as bar:
-        for chunk in resp.iter_content(chunk_size=1024 * 1024):
-            f.write(chunk)
-            bar.update(len(chunk))
+    with tqdm(total=0, unit="B", unit_scale=True, desc=dest.name) as bar:
+        def progress(done, total):
+            if total and bar.total != total:
+                bar.total = total
+                bar.refresh()
+            bar.update(done - bar.n)
+
+        _download_file(url, dest, progress)
 
 
 def download_profile(config: dict, profile_id: str):

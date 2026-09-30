@@ -719,6 +719,84 @@ def review7_press_while_stopping_is_queued():
 
 
 # ---------------------------------------------------------------------------
+# #8  The CLI downloader is atomic: an interrupted transfer leaves no final
+#     file (and no .part) for the exists()/size checks to be fooled by.
+# ---------------------------------------------------------------------------
+
+def review8_cli_download_is_atomic():
+    print("\n[#8] the CLI download leaves nothing behind when interrupted")
+    from types import SimpleNamespace
+    from parakeet_dictation import models as da_models
+    updates = []
+
+    class FakeResponse:
+        def __init__(self, chunks, fail_after):
+            self.headers = {"content-length": str(sum(len(c) for c in chunks))}
+            self._chunks, self._fail = chunks, fail_after
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size=None):
+            for i, c in enumerate(self._chunks):
+                if i == self._fail:
+                    raise ConnectionError("connection reset by peer")
+                yield c
+
+    class FakeBar:
+        def __init__(self, **kw):
+            self.n, self.total = 0, kw.get("total")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def update(self, n):
+            self.n += n
+            updates.append(n)
+
+        def refresh(self):
+            pass
+
+    responses = {}
+    fake_requests = SimpleNamespace(get=lambda url, stream=True, timeout=None: responses[url])
+    fake_tqdm = SimpleNamespace(tqdm=FakeBar)
+    saved = (sys.modules.get("requests"), sys.modules.get("tqdm"))
+    sys.modules["requests"], sys.modules["tqdm"] = fake_requests, fake_tqdm
+    try:
+        with tempfile.TemporaryDirectory(prefix="parakeet-dl-") as tmp:
+            dest = Path(tmp) / "encoder.onnx"
+            responses["u1"] = FakeResponse([b"x" * 1000, b"y" * 1000, b"z" * 1000], fail_after=2)
+            raised = None
+            try:
+                da_models.download_file("u1", dest)
+            except Exception as e:
+                raised = e
+            check("the interrupted download raises", raised is not None, repr(raised))
+            check("no final file is left behind", not dest.exists())
+            check("and no .part either", not list(Path(tmp).iterdir()),
+                  str([p.name for p in Path(tmp).iterdir()]))
+            check("progress was reported through the bar for the bytes that arrived",
+                  sum(updates) == 2000, str(updates))
+
+            updates.clear()
+            responses["u2"] = FakeResponse([b"x" * 1000, b"y" * 1000], fail_after=None)
+            da_models.download_file("u2", dest)
+            check("a completed download lands under its final name",
+                  dest.exists() and dest.stat().st_size == 2000
+                  and [p.name for p in Path(tmp).iterdir()] == ["encoder.onnx"])
+            check("with the whole size reported", sum(updates) == 2000, str(updates))
+    finally:
+        for name, mod in zip(("requests", "tqdm"), saved):
+            if mod is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = mod
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
             2: review2_take_ends_even_if_the_typer_raises,
@@ -726,7 +804,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             4: review4_hotkey_rebuild_unsubscribes,
             5: review5_recognizer_cache_keyed_on_language,
             6: review6_streaming_flushes_tail_on_stop,
-            7: review7_press_while_stopping_is_queued}
+            7: review7_press_while_stopping_is_queued,
+            8: review8_cli_download_is_atomic}
 
 
 def main(argv):
