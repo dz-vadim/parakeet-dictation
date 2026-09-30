@@ -19,6 +19,10 @@ from .diagnostics import DIAG
 MIN_SEGMENT_SAMPLES = 4800   # 0.3 s — shorter segments decode to garbage
 TAIL_PAD_SAMPLES = 8000      # 0.5 s of real zeros appended before decoding
 
+# Grace stop() allows on top of ASREngine.DRAIN_TIMEOUT_S for the capture
+# thread's own teardown (stream close, the drain bookkeeping, the beep).
+STOP_GRACE_S = 5.0
+
 
 # ---------------------------------------------------------------------------
 # Recognizer cache
@@ -102,6 +106,21 @@ def _warm_up(kind: str, recognizer) -> float:
 # ---------------------------------------------------------------------------
 
 class ASREngine:
+    """One capture session at a time, with an explicit stop contract.
+
+    stop() returns only once the session's capture has stopped AND its decode
+    queue has drained — bounded by DRAIN_TIMEOUT_S: past that the session is
+    abandoned (`drain_timeout` in the log), and anything the decoder still
+    produces for it is dropped rather than delivered late into whatever take
+    comes next.  A start() that arrives while a stop is still draining is
+    queued: its thread joins the previous session before opening the
+    microphone, so two sessions never hold the stream or the decoder at once.
+    """
+
+    # How long a stopping session may wait for its decode queue.  Minutes of
+    # backlog would be needed to hit it; a stuck ONNX call is what it is for.
+    DRAIN_TIMEOUT_S = 60.0
+
     def __init__(self, config: AppConfig, profile: dict, on_text, on_partial, on_error,
                  on_partial_type=None, on_commit_partial=None,
                  on_capture_start=None, on_level=None, on_preview=None):
@@ -121,12 +140,14 @@ class ASREngine:
         self._running = False
         self._paused = False
         self._thread = None
+        # One Event per session, created by start() and handed to the run
+        # thread: a session only ever reads its own, so a stop meant for the
+        # previous session cannot be cleared by the next one starting.
         self._stop_event = threading.Event()
         self._pause_event = threading.Event()  # set = NOT paused
         self._pause_event.set()
-        # Set while no session has decodes outstanding.  stop() only joins the
-        # capture thread, so on its own it says nothing about the segment the
-        # end-of-take flush just queued; the take's insertion waits on this.
+        # Set while the newest session has no decodes outstanding.  stop()
+        # already waits for this; wait_drained() is the belt to that brace.
         self._drained = threading.Event()
         self._drained.set()
 
@@ -246,29 +267,56 @@ class ASREngine:
         return self._paused
 
     def start(self):
-        if self._running:
-            return
-        self._stop_event.clear()
+        """Begin a session.  Never blocks: a start that lands while the
+        previous session is still draining is queued behind it (see _run)."""
+        previous = self._thread
+        if previous is not None and previous.is_alive():
+            if not self._stop_event.is_set():
+                return              # alive and not stopping: a duplicate start
+        else:
+            previous = None
+        stop_event = threading.Event()
+        self._stop_event = stop_event
         self._pause_event.set()
         self._paused = False
         self._drained.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread = threading.Thread(target=self._run, args=(stop_event, previous),
+                                        daemon=True)
         self._thread.start()
 
     def stop(self):
+        """Stop the current session and return once it has ENDED: capture
+        closed and the decode queue drained, or DRAIN_TIMEOUT_S elapsed and
+        the session abandoned.  Safe to call from the main loop for the
+        shutdown and settings paths; the controller's take path calls it off
+        the loop so the pill keeps animating.
+        """
         # The flag is set unconditionally: `_running` only goes true once the
         # run thread is past the model check, so gating on it dropped stops
         # that arrived during start-up and left the stream open.
+        thread = self._thread
         self._stop_event.set()
         self._pause_event.set()
-        if self._thread:
-            self._thread.join(timeout=5)
-        self._running = False
-        self._paused = False
+        if thread is not None and thread is not threading.current_thread():
+            bound = self.DRAIN_TIMEOUT_S + STOP_GRACE_S
+            thread.join(timeout=bound)
+            if thread.is_alive():
+                DIAG.log("drain_timeout", stage="stop", waited_s=bound)
+        if self._thread is thread:
+            # No newer session was queued behind this one meanwhile.
+            self._running = False
+            self._paused = False
 
     def wait_drained(self, timeout: float = 60.0) -> bool:
-        """Block until the last session's decode queue has emptied."""
+        """Block until the newest session's decode queue has emptied."""
         return self._drained.wait(timeout)
+
+    def _settle(self):
+        """This session is over.  Its flags are released only if no newer
+        session has been queued behind it — that one's end releases them."""
+        if self._thread is threading.current_thread():
+            self._running = False
+            self._drained.set()
 
     def pause(self):
         if not self._running:
@@ -304,11 +352,26 @@ class ASREngine:
                 rms = 0.0
             GLib.idle_add(self._on_level, rms, speech)
 
-    def _run(self):
+    def _run(self, stop_event=None, previous=None):
+        if stop_event is None:
+            stop_event = self._stop_event
+        if previous is not None:
+            # Queued behind a session that is still draining: the microphone
+            # and the decoder are handed over, never shared.
+            t0 = time.monotonic()
+            previous.join(timeout=self.DRAIN_TIMEOUT_S + STOP_GRACE_S)
+            DIAG.log("session_queued", waited_ms=(time.monotonic() - t0) * 1000,
+                     previous_ended=not previous.is_alive())
+        if stop_event.is_set():
+            # Pressed and released while the previous session drained: there
+            # is nothing to capture any more, so nothing is opened.
+            DIAG.log("session_skipped", reason="stopped_before_open")
+            self._settle()
+            return
         try:
             self._ensure_models()
         except Exception as e:
-            self._drained.set()   # nothing will ever drain — free the waiters
+            self._settle()        # nothing will ever drain — free the waiters
             GLib.idle_add(self._on_error, str(e))
             return
 
@@ -317,23 +380,21 @@ class ASREngine:
 
         try:
             if is_streaming:
-                self._run_streaming()
+                self._run_streaming(stop_event)
             else:
-                self._run_offline()
+                self._run_offline(stop_event)
         except Exception as e:
             GLib.idle_add(self._on_error, str(e))
         finally:
-            # A stop() that timed out while the decoder drained can let this
-            # thread outlive the start of the next session — only clear the
-            # flag if no newer session thread has taken over.
-            if self._thread is threading.current_thread():
-                self._running = False
             # After _run_offline's own finally, so the decode worker has been
-            # joined and every on_text callback is already queued.
-            self._drained.set()
+            # joined (or abandoned) and every on_text callback is already
+            # queued: this is the instant stop() is waiting for.
+            self._settle()
             play_beep_stop(self._config.beep_volume)
 
-    def _run_offline(self):
+    def _run_offline(self, stop_event=None):
+        if stop_event is None:
+            stop_event = self._stop_event
         vad = self._build_vad()
         coalescer = _BlockCoalescer(self._config.coalesce_target_s)
         # Held around every mutation of the VAD and the coalescer, so the
@@ -359,7 +420,7 @@ class ASREngine:
                 and self._config.preview_interval_s > 0:
             previewer = threading.Thread(
                 target=self._preview_worker,
-                args=(vad, coalescer, live_lock, stats), daemon=True)
+                args=(vad, coalescer, live_lock, stats, stop_event), daemon=True)
             previewer.start()
 
         def submit(samples, reason="silence", parts=1):
@@ -414,9 +475,9 @@ class ASREngine:
                 GLib.idle_add(self._on_partial, "")
 
                 last_overflow_log = 0.0
-                while not self._stop_event.is_set():
+                while not stop_event.is_set():
                     self._pause_event.wait(timeout=0.1)
-                    if self._stop_event.is_set():
+                    if stop_event.is_set():
                         break
                     if self._paused:
                         continue
@@ -463,7 +524,7 @@ class ASREngine:
             # and queued: drop it before the committed text arrives, so the
             # panel cannot end the take showing a guess next to the real thing.
             if previewer is not None:
-                self._stop_event.set()      # the pass is timer-driven; wake it
+                stop_event.set()            # the pass is timer-driven; wake it
                 previewer.join(timeout=2)
                 if previewer.is_alive():
                     # Still inside a decode.  It checks the stop flag before it
@@ -478,9 +539,15 @@ class ASREngine:
                 pending.put(None, timeout=5)
             except queue.Full:
                 pass
-            worker.join(timeout=60)
+            worker.join(timeout=self.DRAIN_TIMEOUT_S)
             if worker.is_alive():
-                DIAG.log("drain_timeout", depth=pending.qsize())
+                # Still inside a decode (or behind a backlog).  Waiting longer
+                # would hold the next take hostage, so this session is
+                # abandoned: the worker sees the flag and drops whatever it
+                # still produces instead of delivering it into another take.
+                stats["abandoned"] = True
+                DIAG.log("drain_timeout", stage="session", depth=pending.qsize(),
+                         timeout_s=self.DRAIN_TIMEOUT_S)
             DIAG.log("session_stop", mode="offline", segments=stats["segments"],
                      discarded_short=stats["too_short"], overflow=stats["overflow"],
                      queue_full=stats["queue_full"], flushed=stats["flushed"],
@@ -511,6 +578,13 @@ class ASREngine:
             if item is None:
                 return
             samples, reason, parts = item
+            if stats.get("abandoned"):
+                # The session gave up waiting for this queue: its take is
+                # over, so the audio is dropped undecoded rather than decoded
+                # into a document the user has moved on from.
+                DIAG.log("late_segment_dropped",
+                         dur_ms=len(samples) / SAMPLE_RATE * 1000, reason=reason)
+                continue
             try:
                 text, decode_ms = self._decode_segment(
                     recognizer, samples,
@@ -518,6 +592,10 @@ class ASREngine:
                     target_dbfs=self._config.normalize_target_dbfs)
             except Exception as e:
                 DIAG.log("decode_error", err=type(e).__name__)
+                continue
+            if stats.get("abandoned"):
+                # The bound elapsed during THIS decode.
+                DIAG.log("late_text_dropped", chars=len(text), decode_ms=decode_ms)
                 continue
             stats["decode_ms"] += decode_ms
             DIAG.log("segment", dur_ms=len(samples) / SAMPLE_RATE * 1000,
@@ -566,7 +644,7 @@ class ASREngine:
             DIAG.log("normalize", **info)
         return text, decode_ms
 
-    def _preview_worker(self, vad, coalescer, live_lock, stats):
+    def _preview_worker(self, vad, coalescer, live_lock, stats, stop_event=None):
         """Decode the still-open audio on a timer so the panel shows something.
 
         DISPLAY ONLY.  What this returns is a hypothesis about audio that has
@@ -588,6 +666,8 @@ class ASREngine:
         thread pool spinning between calls).  A 2-3 s cadence costs a fraction
         of that — see `preview_interval_s`.
         """
+        if stop_event is None:
+            stop_event = self._stop_event
         interval = max(float(self._config.preview_interval_s), 0.2)
         window = int(max(float(self._config.preview_window_s), 1.0) * SAMPLE_RATE)
         try:
@@ -596,11 +676,11 @@ class ASREngine:
             recognizer, _ = self._acquire_offline_recognizer()
         except Exception:
             return          # a failed preview must never take the take down
-        if self._stop_event.is_set():
+        if stop_event.is_set():
             return
         last_len = 0
         showing = False
-        while not self._stop_event.wait(interval):
+        while not stop_event.wait(interval):
             if self._paused:
                 continue
             with live_lock:
@@ -635,7 +715,7 @@ class ASREngine:
                 continue
             finally:
                 INFERENCE_LOCK.release()
-            if self._stop_event.is_set():
+            if stop_event.is_set():
                 return      # the take ended mid-pass: this guess is history
             decode_ms = (time.perf_counter() - t0) * 1000
             last_len = audio.size
@@ -659,7 +739,9 @@ class ASREngine:
             showing = True
             GLib.idle_add(self._on_preview, text)
 
-    def _run_streaming(self):
+    def _run_streaming(self, stop_event=None):
+        if stop_event is None:
+            stop_event = self._stop_event
         recognizer, _ = self._acquire_online_recognizer()
         with INFERENCE_LOCK:
             stream = recognizer.create_stream()
@@ -683,9 +765,9 @@ class ASREngine:
             GLib.idle_add(self._on_partial, "")
 
             last_overflow_log = 0.0
-            while not self._stop_event.is_set():
+            while not stop_event.is_set():
                 self._pause_event.wait(timeout=0.1)
-                if self._stop_event.is_set():
+                if stop_event.is_set():
                     break
                 if self._paused:
                     continue

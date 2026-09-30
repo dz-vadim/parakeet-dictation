@@ -343,12 +343,13 @@ class DictationController:
         self._take_stop_t0 = time.monotonic()
 
         def _worker():
+            # stop() returns once capture has stopped and the decoder has
+            # drained (bounded), so the segment the flush just queued is in
+            # hand before the take is declared over — in end-of-take mode
+            # because it belongs in the one insertion, in per-segment mode
+            # because it is the tail the user was still speaking when they
+            # let go.  wait_drained() is the belt to that brace.
             self._engine.stop()
-            # stop() only joins the capture thread.  The segment the flush just
-            # queued may still be decoding, and its text has to be in hand
-            # before the take is declared over — in end-of-take mode because it
-            # belongs in the one insertion, in per-segment mode because it is
-            # the tail the user was still speaking when they let go.
             if not self._engine.wait_drained(60.0):
                 DIAG.log("drain_wait_timeout", take=take)
             GLib.idle_add(self._finish_take, take, reason)
