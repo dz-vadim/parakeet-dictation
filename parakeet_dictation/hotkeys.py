@@ -173,11 +173,12 @@ class KGlobalAccelHotkey:
             self._on_release()
 
     def unregister(self):
+        # signal_unsubscribe, and not inside a blanket except: the previous
+        # spelling named a method Gio.DBusConnection does not have, the
+        # AttributeError was swallowed, and every rebuild() leaked its two
+        # handlers — after N settings saves each key press fired N+1 times.
         for sub in self._subs:
-            try:
-                self._bus.unsubscribe(sub)
-            except Exception:
-                pass
+            self._bus.signal_unsubscribe(sub)
         self._subs = []
         if self.registered:
             try:

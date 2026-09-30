@@ -392,10 +392,109 @@ def review3_apply_config_preloads_on_model_switch():
 
 
 # ---------------------------------------------------------------------------
+# #4  HotkeyManager.rebuild() must drop the previous kglobalaccel signal
+#     subscriptions, or every settings save adds one more handler per key.
+# ---------------------------------------------------------------------------
+
+class FakeGioBus:
+    """Gio.DBusConnection as KGlobalAccelHotkey uses it.  Like the real one it
+    has signal_unsubscribe() and no unsubscribe()."""
+
+    def __init__(self):
+        self.subs = {}
+        self._next = 1
+        self.calls = []
+
+    def call_sync(self, _service, _path, _iface, method, _params, _reply_type,
+                  _flags, _timeout, _cancellable):
+        self.calls.append(method)
+        if method == "globalShortcutAvailable":
+            return GLib.Variant("(b)", (True,))
+        if method == "getComponent":
+            return GLib.Variant("(o)", ("/component/parakeet_dictation",))
+        if method == "setShortcutKeys":
+            return GLib.Variant("(a(ai))", ([([0x1000000],)],))
+        return None
+
+    def signal_subscribe(self, _sender, _iface, signal, _path, _arg0, _flags, handler):
+        sid = self._next
+        self._next += 1
+        self.subs[sid] = (signal, handler)
+        return sid
+
+    def signal_unsubscribe(self, sid):
+        del self.subs[sid]
+
+    def emit(self, signal, component, action):
+        for _sid, (sig, handler) in list(self.subs.items()):
+            if sig == signal:
+                handler(self, ":1.9", "/component/parakeet_dictation",
+                        "org.kde.kglobalaccel.Component", signal,
+                        GLib.Variant("(ssx)", (component, action, 0)))
+
+
+class FakeGlobalHotKeys:
+    def __init__(self, _bindings):
+        self.daemon = False
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+
+def review4_hotkey_rebuild_unsubscribes():
+    print("\n[#4] rebuild() leaves exactly one press/release subscription pair")
+    from types import SimpleNamespace
+    from gi.repository import Gio
+    from parakeet_dictation import hotkeys as da_hotkeys
+    da_hotkeys.DIAG = TEST_DIAG
+    bus = FakeGioBus()
+    saved_gio = da_hotkeys.Gio
+    saved_pynput = sys.modules.get("pynput")
+    da_hotkeys.Gio = SimpleNamespace(
+        bus_get_sync=lambda *_a: bus, BusType=Gio.BusType,
+        DBusCallFlags=Gio.DBusCallFlags, DBusSignalFlags=Gio.DBusSignalFlags)
+    sys.modules["pynput"] = SimpleNamespace(
+        keyboard=SimpleNamespace(GlobalHotKeys=FakeGlobalHotKeys))
+    presses, releases = [], []
+    try:
+        cfg = da_config.AppConfig(hotkey_mode="hold")
+        mgr = da_hotkeys.HotkeyManager(
+            cfg, on_toggle=lambda: None, on_start=lambda: None, on_stop=lambda: None,
+            on_pause=lambda: None, on_hold_press=lambda: presses.append(1),
+            on_hold_release=lambda: releases.append(1))
+        status = mgr.start()
+        check("hold mode registers cleanly and subscribes to press and release",
+              status == "" and len(bus.subs) == 2, f"status={status!r} subs={len(bus.subs)}")
+        for _ in range(3):
+            mgr.rebuild(cfg)
+        check("after three rebuilds exactly two subscriptions remain",
+              len(bus.subs) == 2, f"{len(bus.subs)} subscriptions")
+        bus.emit("globalShortcutPressed", da_hotkeys.KGlobalAccelHotkey.COMPONENT, "push-to-talk")
+        bus.emit("globalShortcutReleased", da_hotkeys.KGlobalAccelHotkey.COMPONENT, "push-to-talk")
+        check("one key press fires the handler once, not four times",
+              presses == [1] and releases == [1], f"presses={len(presses)} releases={len(releases)}")
+        check("each rebuild unregistered the previous action with kglobalaccel",
+              bus.calls.count("unRegister") == 3 and bus.calls.count("doRegister") == 4,
+              f"unRegister x{bus.calls.count('unRegister')}, doRegister x{bus.calls.count('doRegister')}")
+        mgr.stop()
+        check("stop() leaves no subscription behind", len(bus.subs) == 0, str(bus.subs))
+    finally:
+        da_hotkeys.Gio = saved_gio
+        if saved_pynput is None:
+            sys.modules.pop("pynput", None)
+        else:
+            sys.modules["pynput"] = saved_pynput
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
             2: review2_take_ends_even_if_the_typer_raises,
-            3: review3_apply_config_preloads_on_model_switch}
+            3: review3_apply_config_preloads_on_model_switch,
+            4: review4_hotkey_rebuild_unsubscribes}
 
 
 def main(argv):
