@@ -93,12 +93,9 @@ class TrayIcon:
         self._indicator.set_menu(menu)
 
     def _on_switch_model(self, _item, model_id):
-        new_config = self._controller.config
-        new_config.model_profile = model_id
-        self._controller.apply_config(new_config)
-        self._hotkey_mgr.rebuild(new_config)
-        self._build_menu()
-        self.update_ui()
+        cfg = self._controller.config
+        cfg.model_profile = model_id
+        self.apply_settings(cfg)
 
     def _on_toggle(self, _item=None):
         self._controller.toggle()
@@ -141,12 +138,15 @@ class TrayIcon:
         SettingsDialog(
             self._controller.config,
             self._controller.profiles_data,
-            on_save=self._apply_settings,
+            on_save=self.apply_settings,
         )
 
-    def _apply_settings(self, new_config: AppConfig):
-        self._controller.apply_config(new_config)
-        self._controller.notify(self._hotkey_mgr.rebuild(new_config))
+    def apply_settings(self, cfg: AppConfig):
+        """The one place a settings change lands, whichever window made it:
+        apply (which saves), rebuild the hotkeys and report a conflict, then
+        refresh the menu and the indicator."""
+        self._controller.apply_config(cfg)
+        self._controller.notify(self._hotkey_mgr.rebuild(cfg))
         self._build_menu()
         self.update_ui()
 

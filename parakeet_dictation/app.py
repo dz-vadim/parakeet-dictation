@@ -87,7 +87,7 @@ def main():
     main_window = MainWindow(controller, hotkey_mgr)
 
     tray = TrayIcon(controller, hotkey_mgr, main_window)
-    main_window._tray = tray  # So model changes from window rebuild tray menu
+    main_window.on_apply_settings = tray.apply_settings
     controller.notify(hotkey_mgr.start())
 
     signal.signal(signal.SIGINT, lambda *_: (controller.shutdown(), Gtk.main_quit()))
@@ -113,12 +113,7 @@ def main():
     # First-run: show welcome dialog if no models are downloaded
     profiles_data = controller.profiles_data
     if not _any_model_downloaded(profiles_data["profiles"]):
-        def _on_model_ready(new_config):
-            controller.apply_config(new_config)
-            hotkey_mgr.rebuild(new_config)
-            tray._build_menu()
-            tray.update_ui()
-        WelcomeDialog(profiles_data, config, _on_model_ready)
+        WelcomeDialog(profiles_data, config, tray.apply_settings)
 
     profile_name = controller.profiles.get(
         config.model_profile, {}

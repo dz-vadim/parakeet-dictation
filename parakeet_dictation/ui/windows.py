@@ -169,7 +169,6 @@ class WelcomeDialog(Gtk.Dialog):
         def on_done(success, err):
             if success:
                 self._config.model_profile = "desktop"
-                self._config.save()
                 self.destroy()
                 if self._on_model_ready:
                     self._on_model_ready(self._config)
@@ -341,7 +340,6 @@ class SettingsDialog(Gtk.Dialog):
 
     def _on_use_model(self, _btn, model_id):
         self._config.model_profile = model_id
-        self._config.save()
         if self._on_save:
             self._on_save(self._config)
         self._populate_models()
@@ -494,7 +492,6 @@ class SettingsDialog(Gtk.Dialog):
         self._config.hotkey_start = self._hk_start.binding
         self._config.hotkey_stop = self._hk_stop.binding
         self._config.hotkey_pause = self._hk_pause.binding
-        self._config.save()
         if self._on_save:
             self._on_save(self._config)
 
@@ -708,7 +705,6 @@ class SettingsDialog(Gtk.Dialog):
         self._config.night_start = int(self._night_start_spin.get_value())
         self._config.night_end = int(self._night_end_spin.get_value())
         audio._active_config = self._config
-        self._config.save()
         if self._on_save:
             self._on_save(self._config)
 
@@ -770,6 +766,9 @@ class MainWindow(Gtk.Window):
         super().__init__(title=APP_NAME)
         self._controller = controller
         self._hotkey_mgr = hotkey_mgr
+        # app.py points this at TrayIcon.apply_settings, so a model change
+        # made here rebuilds the tray menu and reports a hotkey conflict too.
+        self.on_apply_settings = None
         self.set_default_size(480, -1)
         self.set_resizable(False)
         self.set_icon_name("audio-input-microphone")
@@ -872,10 +871,9 @@ class MainWindow(Gtk.Window):
         if not _is_model_downloaded(model_id, self._controller.profiles):
             self._model_combo.set_active_id(self._controller.config.model_profile)
             return
-        new_config = self._controller.config
-        new_config.model_profile = model_id
-        self._controller.apply_config(new_config)
-        self._hotkey_mgr.rebuild(new_config)
+        cfg = self._controller.config
+        cfg.model_profile = model_id
+        self._apply_settings(cfg)
         # Keep streaming checkbox in sync
         is_streaming = self._controller.profiles.get(model_id, {}).get("streaming", False)
         self._streaming_check.handler_block_by_func(self._on_streaming_toggled)
@@ -883,9 +881,6 @@ class MainWindow(Gtk.Window):
         self._streaming_check.handler_unblock_by_func(self._on_streaming_toggled)
         if not is_streaming:
             self._non_streaming_model = model_id
-        if hasattr(self, "_tray") and self._tray:
-            self._tray._build_menu()
-            self._tray.update_ui()
 
     def _on_streaming_toggled(self, check):
         if check.get_active():
@@ -906,15 +901,18 @@ class MainWindow(Gtk.Window):
             check.handler_unblock_by_func(self._on_streaming_toggled)
             return
 
-        new_config = self._controller.config
-        new_config.model_profile = target
-        self._controller.apply_config(new_config)
-        self._hotkey_mgr.rebuild(new_config)
+        cfg = self._controller.config
+        cfg.model_profile = target
+        self._apply_settings(cfg)
         # Sync the model combo
         self._model_combo.set_active_id(target)
-        if hasattr(self, "_tray") and self._tray:
-            self._tray._build_menu()
-            self._tray.update_ui()
+
+    def _apply_settings(self, cfg):
+        if self.on_apply_settings:
+            self.on_apply_settings(cfg)
+        else:
+            self._controller.apply_config(cfg)
+            self._hotkey_mgr.rebuild(cfg)
 
     def _update_controls(self):
         running = self._controller.is_running
