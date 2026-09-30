@@ -603,9 +603,105 @@ def defect5_missing_helper_named():
 
 
 # ---------------------------------------------------------------------------
+# #6  Clipboard restore is byte-verbatim: trailing newline, non-UTF-8 text
+#     and a large clipboard all come back exactly as they were.
+# ---------------------------------------------------------------------------
+
+class WlClipboardFake:
+    """wl-copy / wl-paste / ydotool as they behave on this desktop.
+
+    Measured against wl-clipboard 2.3.0 on 2026-09-30: wl-paste appends one
+    '\\n' to text unless -n/--no-newline is given, and reads verbatim with
+    it; wl-copy stores argv text or stdin bytes verbatim; an argv element
+    over 128 KiB fails at exec with E2BIG (OSError errno 7,
+    "Argument list too long"), which the arg form of a large restore hits.
+    """
+    ARG_MAX_ELEMENT = 131072
+
+    def __init__(self):
+        self.clip = None
+        self.primary = None
+        self.pastes = []          # clipboard content at each chord press
+
+    def _sel(self, args):
+        return "primary" if ("--primary" in args or "-p" in args) else "clip"
+
+    def run(self, args, **kw):
+        args = list(args)
+        if args[0] == "wl-copy":
+            sel = self._sel(args)
+            if "--clear" in args:
+                setattr(self, sel, None)
+                return _Completed()
+            if "--" in args:
+                text = args[args.index("--") + 1:]
+                for a in text:
+                    if len(a.encode("utf-8", "surrogateescape")) > self.ARG_MAX_ELEMENT:
+                        raise OSError(7, "Argument list too long", "wl-copy")
+                data = " ".join(text).encode("utf-8", "surrogateescape")
+            else:
+                data = bytes(kw.get("input") or b"")
+            setattr(self, sel, data)
+            return _Completed()
+        if args[0] == "wl-paste":
+            data = getattr(self, self._sel(args))
+            if data is None:
+                return _Completed(1, b"")
+            if not ("-n" in args or "--no-newline" in args):
+                data = data + b"\n"
+            return _Completed(0, data)
+        if args[0] == "ydotool":
+            self.pastes.append(self.clip)
+        return _Completed()
+
+
+def defect6_clipboard_verbatim():
+    print("\n[#6] clipboard restore round-trips the user's bytes verbatim")
+    from parakeet_dictation import insert as da_insert
+    da_insert.DIAG = TEST_DIAG
+    saved = (da_insert.subprocess.run, da_insert.shutil.which, da_insert.portal_keyboard)
+    fake = WlClipboardFake()
+    da_insert.subprocess.run = fake.run
+    da_insert.shutil.which = lambda n: f"/usr/bin/{n}" if n == "ydotool" else None
+    da_insert.portal_keyboard = lambda: None
+    try:
+        cases = [
+            ("trailing newline", b"line one\nline two\n"),
+            ("two trailing newlines", b"abc\n\n"),
+            ("just a newline", b"\n"),
+            ("non-UTF-8 text (latin-1)", b"caf\xe9 au lait\n"),
+            ("300 KB of text", b"x" * 300000 + b"\n"),
+        ]
+        for label, payload in cases:
+            fake.clip, fake.primary = payload, payload + b"P"
+            fake.pastes.clear()
+            typer = da_insert.TextTyper("clipboard", keep_on_clipboard=False)
+            typer.type_text("dictated")
+            check(f"{label}: the paste carried the dictated text",
+                  fake.pastes == [b"dictated "], str(fake.pastes)[:60])
+            time.sleep(da_insert.RESTORE_AFTER_S + 0.4)
+            check(f"{label}: clipboard restored verbatim", fake.clip == payload,
+                  f"got {fake.clip[:24]!r}..." if fake.clip else repr(fake.clip))
+            check(f"{label}: primary restored verbatim", fake.primary == payload + b"P",
+                  f"got {fake.primary[:24]!r}..." if fake.primary else repr(fake.primary))
+
+        fake.clip, fake.primary = None, None
+        typer = da_insert.TextTyper("clipboard", keep_on_clipboard=False)
+        typer.type_text("dictated")
+        time.sleep(da_insert.RESTORE_AFTER_S + 0.4)
+        check("an empty clipboard is left empty, not holding the dictated text",
+              fake.clip is None and fake.primary is None,
+              f"{fake.clip!r} / {fake.primary!r}")
+    finally:
+        (da_insert.subprocess.run, da_insert.shutil.which,
+         da_insert.portal_keyboard) = saved
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = [defect2_config_load, defect3_engine_stop,
-            defect4_single_instance, defect5_missing_helper_named]
+            defect4_single_instance, defect5_missing_helper_named,
+            defect6_clipboard_verbatim]
 
 
 def main():

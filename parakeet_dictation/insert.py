@@ -425,10 +425,17 @@ def portal_keyboard() -> PortalKeyboard:
 # Text typer
 # ---------------------------------------------------------------------------
 
-def _run_quiet(args, timeout=5):
+def _run_quiet(args, timeout=5, input=None):
     """Run a helper that may daemonise (wl-copy): no inherited pipes, else the
-    caller deadlocks waiting for a stdout the daemon never closes."""
-    return subprocess.run(args, timeout=timeout, stdout=subprocess.DEVNULL,
+    caller deadlocks waiting for a stdout the daemon never closes.
+
+    `input` (bytes) goes to the helper's stdin.  That is how a restore hands
+    wl-copy the user's clipboard back: the bytes as read, not an argv string
+    — argv would decode them (and clear a non-UTF-8 clipboard) and caps one
+    argument at 128 KiB (E2BIG, measured: a 300 KB clipboard was silently
+    not restored).
+    """
+    return subprocess.run(args, timeout=timeout, input=input, stdout=subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL, close_fds=True)
 
 
@@ -558,7 +565,13 @@ class TextTyper:
 
     @staticmethod
     def _read_selection(primary: bool = False):
-        """Current selection text, or None if empty or not plain text."""
+        """Current selection as raw bytes, or None if empty or not text.
+
+        Verbatim: `--no-newline` makes wl-paste output the content as is (it
+        otherwise appends one '\\n'), and the bytes are kept as bytes so the
+        restore can hand back exactly what was read — a trailing newline, a
+        non-UTF-8 encoding, any size.
+        """
         try:
             # No --type: wl-paste then picks whichever text flavour the owner
             # offers.  Pinning "text/plain" fails against apps that only offer
@@ -573,10 +586,7 @@ class TextTyper:
             return None
         if res.returncode != 0:
             return None
-        try:
-            return res.stdout.decode("utf-8")
-        except UnicodeDecodeError:
-            return None
+        return bytes(res.stdout)
 
     @classmethod
     def _read_clipboard(cls):
@@ -587,11 +597,12 @@ class TextTyper:
 
         Delayed and on a background thread: the target window reads the
         selection asynchronously, so restoring at once can race the paste, and
-        blocking here would stall text delivery.  Only text survives the
+        blocking here would stall text delivery.  The bytes wl-paste returned
+        go back through wl-copy's stdin untouched.  Only text survives the
         round-trip — an image that was on the clipboard is already lost by the
-        time wl-copy ran, so an unreadable clipboard is cleared rather than
-        left holding the dictated phrase (that is the Klipper-history leak
-        this exists to prevent).
+        time wl-copy ran, so a clipboard that could not be read is cleared
+        rather than left holding the dictated phrase (that is the
+        Klipper-history leak this exists to prevent).
         """
         def _worker():
             time.sleep(RESTORE_AFTER_S)
@@ -602,11 +613,12 @@ class TextTyper:
                 for flag, value in (([], clip), (["--primary"], primary)):
                     try:
                         if value:
-                            _run_quiet(["wl-copy", *flag, "--", value])
+                            _run_quiet(["wl-copy", *flag], input=value)
                         else:
                             _run_quiet(["wl-copy", *flag, "--clear"])
-                    except (OSError, subprocess.TimeoutExpired):
-                        pass
+                    except (OSError, subprocess.TimeoutExpired) as e:
+                        DIAG.log("clipboard_restore_failed", primary=bool(flag),
+                                 err=type(e).__name__)
                 self._clip_restore_pending = False
                 self._clip_saved = None
 

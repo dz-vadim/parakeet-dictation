@@ -130,7 +130,12 @@ def fake_run(args, **_kw):
     args = list(args)
     if args[0] == "wl-copy":
         sel = PRIMARY if ("--primary" in args or "-p" in args) else CLIP
-        sel["text"] = "" if "--clear" in args else args[-1]
+        if "--clear" in args:
+            sel["text"] = ""
+        elif "--" in args:
+            sel["text"] = args[-1]                       # staging: argv text
+        else:                                            # restore: raw bytes on stdin
+            sel["text"] = (_kw.get("input") or b"").decode("utf-8")
     elif args[0] == "wl-paste":
         sel = PRIMARY if ("--primary" in args or "-p" in args) else CLIP
         return _Completed(0, sel["text"].encode())
