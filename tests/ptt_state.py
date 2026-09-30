@@ -7,17 +7,20 @@ release mid-stop) and the fast re-trigger that the reset rule exists for.
 """
 import pathlib, sys, threading
 sys.path.insert(0, "/home/dz/Projects/parakeet-dictation")
-import dictation_app as da
+from parakeet_dictation import (config as da_config, controller as da_controller,
+                                diagnostics as da_diagnostics, engine as da_engine)
 from gi.repository import GLib
 
 # Step 8 exercises apply_config(), which calls AppConfig.save() — point that
 # at a scratch file so running the tests cannot rewrite the user's real config.
-da.CONFIG_DIR = pathlib.Path(__file__).resolve().parent
-da.CONFIG_FILE = da.CONFIG_DIR / ".ptt-state-config.json"
+da_config.CONFIG_DIR = pathlib.Path(__file__).resolve().parent
+da_config.CONFIG_FILE = da_config.CONFIG_DIR / ".ptt-state-config.json"
 
 DIAG_PATH = pathlib.Path(__file__).resolve().parent / ".ptt-state-diag.log"
 DIAG_PATH.unlink(missing_ok=True)
-da.DIAG = da.DiagnosticLog(DIAG_PATH)
+TEST_DIAG = da_diagnostics.DiagnosticLog(DIAG_PATH)
+for _mod in (da_controller, da_engine):
+    _mod.DIAG = TEST_DIAG
 
 FAILS = []
 def check(label, ok, detail=""):
@@ -48,7 +51,7 @@ class FakeOverlay:
     def preview_reset(self): self.resets += 1; self.previews.clear()
     def last(self): return self.states[-1] if self.states else None
 
-ctl = da.DictationController(da.AppConfig())
+ctl = da_controller.DictationController(da_config.AppConfig())
 eng = StubEngine(); ctl._engine = eng
 ov = FakeOverlay(); ctl.set_overlay(ov)
 
@@ -80,7 +83,7 @@ def s1_proceed():
     check("capture_open moves to recording", ctl.gesture == "recording", ctl.gesture)
     check("pill is listening", ov.last()[0] == "listening", str(ov.last()))
     check("decide_stop == proceed while recording",
-          ctl._decide_stop() == da.STOP_PROCEED)
+          ctl._decide_stop() == da_controller.STOP_PROCEED)
     ctl.hold_release()
     check("pill flips to processing before the tail elapses",
           ov.last()[0] == "processing", str(ov.last()))
@@ -98,7 +101,7 @@ def s2_defer():
     print("\n[2] release while the start is still in flight: deferred, not dropped")
     ov.states.clear(); eng.stops = 0
     ctl.hold_press()
-    check("decide_stop == defer while starting", ctl._decide_stop() == da.STOP_DEFER)
+    check("decide_stop == defer while starting", ctl._decide_stop() == da_controller.STOP_DEFER)
     ctl.hold_release()
     check("stop held, engine untouched", eng.stops == 0 and ctl.gesture == "starting",
           ctl.gesture)
@@ -118,7 +121,7 @@ def s2_check():
 def s3_reject():
     print("\n[3] release with nothing running: visible error, not a silent no-op")
     ov.states.clear(); eng.stops = 0
-    check("decide_stop == reject when idle", ctl._decide_stop() == da.STOP_REJECT)
+    check("decide_stop == reject when idle", ctl._decide_stop() == da_controller.STOP_REJECT)
     ctl.hold_release()
     check("error state shown", ov.last()[0] == "error", str(ov.last()))
     check("message is actionable", "hold" in ov.last()[1].lower(), ov.last()[1])

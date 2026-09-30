@@ -2,15 +2,16 @@
 """Overlay honesty checks: refusal gate, watchdog, stale meter, preview panel."""
 import sys, time
 sys.path.insert(0, "/home/dz/Projects/parakeet-dictation")
-import dictation_app as da
+from parakeet_dictation import config as da_config, diagnostics as da_diagnostics
+from parakeet_dictation.ui import overlay as da_overlay
 from gi.repository import GLib
 
 import pathlib as _pl; DIAG_PATH = str(_pl.Path(__file__).resolve().parent / ".overlay-safety-diag.log")
 import pathlib; pathlib.Path(DIAG_PATH).unlink(missing_ok=True)
-da.DIAG = da.DiagnosticLog(pathlib.Path(DIAG_PATH))
+da_overlay.DIAG = da_diagnostics.DiagnosticLog(pathlib.Path(DIAG_PATH))
 
 capturing = {"on": False}
-ov = da.PillOverlay(da.AppConfig())
+ov = da_overlay.PillOverlay(da_config.AppConfig())
 ov.set_capture_probe(lambda: capturing["on"])
 fails = []
 def check(label, ok, detail=""):
@@ -81,10 +82,10 @@ def phase4_preview():
           f"{ov.preview.segments} segments, {len(ov.preview.rows)} rows, "
           f"{ov.preview.panel_height()} px")
     check("panel is wider than the pill and still on screen",
-          da.PillOverlay.WIDTH < ov.preview.panel_width()
-          <= da.TranscriptPreview.MAX_WIDTH, f"{ov.preview.panel_width()} px")
+          da_overlay.PillOverlay.WIDTH < ov.preview.panel_width()
+          <= da_overlay.TranscriptPreview.MAX_WIDTH, f"{ov.preview.panel_width()} px")
     check("the pill itself was neither moved nor resized by the panel",
-          ov._win.get_size() == (da.PillOverlay.WIDTH, da.PillOverlay.HEIGHT),
+          ov._win.get_size() == (da_overlay.PillOverlay.WIDTH, da_overlay.PillOverlay.HEIGHT),
           str(ov._win.get_size()))
     check("preview_update logged with chars and segments",
           any("event=preview_update" in l and "chars=" in l and "segments=" in l
@@ -98,7 +99,7 @@ def phase4_preview():
           and ov.preview.segments == 0)
 
     # The setting is a real off switch, not just a hidden window.
-    off = da.AppConfig(preview=False)
+    off = da_config.AppConfig(preview=False)
     ov.apply_config(off)
     capturing["on"] = True
     ov.capture_started()
@@ -106,15 +107,15 @@ def phase4_preview():
     ov.preview_append("preview is switched off")
     check("preview=False shows nothing and stores nothing",
           not ov.preview.visible() and ov.preview.chars == 0)
-    ov.apply_config(da.AppConfig())
+    ov.apply_config(da_config.AppConfig())
 
-    da.Gtk.main_quit()
+    da_overlay.Gtk.main_quit()
     return False
 
-GLib.timeout_add(20000, lambda: (print("TIMEOUT"), da.Gtk.main_quit(), False)[2])
+GLib.timeout_add(20000, lambda: (print("TIMEOUT"), da_overlay.Gtk.main_quit(), False)[2])
 GLib.timeout_add(200, phase1)
 try:
-    da.Gtk.main()
+    da_overlay.Gtk.main()
 finally:
     ov.debug_release()
 print("RESULT:", "ALL PASS" if not fails else f"FAILED: {fails}")

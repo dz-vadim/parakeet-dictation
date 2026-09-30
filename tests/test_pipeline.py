@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the reworked offline ASR path in dictation_app against the real model.
+"""Exercise the reworked offline ASR path in parakeet_dictation against the real model.
 
 Drives the real `ASREngine._run_offline` with a fake input stream and a scripted
 VAD, so the real decode queue, worker thread, length floor, trailing pad and
@@ -12,7 +12,7 @@ diagnostics all run.  Checks:
   * the diagnostics log stays under its size cap with whole lines only
   * the recognizer is loaded once and reused by a second session
 
-Run:  .venv/bin/python testing/test_pipeline.py
+Run:  .venv/bin/python tests/test_pipeline.py
 """
 
 import sys
@@ -23,11 +23,14 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
+BENCH = HERE.parent / "bench"   # fixture audio lives with the benchmark data
 sys.path.insert(0, str(HERE.parent))
 
-import dictation_app as da  # noqa: E402
+from parakeet_dictation import (audio as da_audio, config as da_config,  # noqa: E402
+                                diagnostics as da_diagnostics, engine as da_engine,
+                                models as da_models)
 
-SR = da.SAMPLE_RATE
+SR = da_audio.SAMPLE_RATE
 FAILURES = []
 
 
@@ -52,14 +55,14 @@ class GLibShim:
         return 0
 
 
-da.GLib = GLibShim
-da.play_beep_start = lambda *a, **k: None
-da.play_beep_stop = lambda *a, **k: None
-da.play_beep_pause = lambda *a, **k: None
+da_engine.GLib = GLibShim
+da_engine.play_beep_start = lambda *a, **k: None
+da_engine.play_beep_stop = lambda *a, **k: None
+da_engine.play_beep_pause = lambda *a, **k: None
 
 DIAG_PATH = HERE / ".test-diagnostics.log"
 DIAG_PATH.unlink(missing_ok=True)
-da.DIAG = da.DiagnosticLog(DIAG_PATH, max_bytes=5 * 1024 * 1024)
+da_engine.DIAG = da_diagnostics.DiagnosticLog(DIAG_PATH, max_bytes=5 * 1024 * 1024)
 
 
 class FakeStream:
@@ -109,7 +112,7 @@ class ScriptedVad:
         self.samples_seen += len(samples)
         self._calls += 1
         if self._pending and self._calls % self._every == 0:
-            self._ready.append(da._SpeechSegment(self._pending.pop(0)))
+            self._ready.append(da_audio._SpeechSegment(self._pending.pop(0)))
 
     def is_speech_detected(self):
         return False
@@ -126,7 +129,7 @@ class ScriptedVad:
 
     def flush(self):
         while self._pending:
-            self._ready.append(da._SpeechSegment(self._pending.pop(0)))
+            self._ready.append(da_audio._SpeechSegment(self._pending.pop(0)))
 
 
 def load_wav(path):
@@ -142,11 +145,11 @@ def make_blocks(total_samples, block=1600):
 
 
 def new_engine(config=None):
-    config = config or da.AppConfig()
-    profile = da.load_model_profiles()["profiles"][config.model_profile]
+    config = config or da_config.AppConfig()
+    profile = da_models.load_model_profiles()["profiles"][config.model_profile]
     emitted = []
     errors = []
-    engine = da.ASREngine(
+    engine = da_engine.ASREngine(
         config, profile,
         on_text=emitted.append,
         on_partial=lambda t: None,
@@ -166,7 +169,7 @@ def run_session(engine, blocks, vad, overflow_every=0):
         holder["stream"] = FakeStream(blocks, engine._stop_event.set, overflow_every)
         return holder["stream"]
 
-    da.sd.InputStream = factory
+    da_engine.sd.InputStream = factory
     engine._run_offline()
     return holder["stream"]
 
@@ -178,12 +181,12 @@ def diag_lines():
 # --------------------------------------------------------------------------
 
 def main():
-    seg_files = sorted((HERE / "segs").glob("*.wav"))
+    seg_files = sorted((BENCH / "segs").glob("*.wav"))
     if len(seg_files) < 4:
-        sys.exit(f"need at least 4 wavs in {HERE / 'segs'}")
+        sys.exit(f"need at least 4 wavs in {BENCH / 'segs'}")
     print(f"segments on disk: {[p.name for p in seg_files]}")
 
-    config = da.AppConfig()
+    config = da_config.AppConfig()
     print(f"profile={config.model_profile} threads={config.num_threads}")
 
     # ---- 1. model lifecycle: load once, reuse afterwards ------------------
@@ -205,7 +208,7 @@ def main():
     print("\n[2] trailing silence pad")
     def bare_decode(samples):
         """Decode without the trailing pad, for contrast."""
-        with da.INFERENCE_LOCK:
+        with da_engine.INFERENCE_LOCK:
             s = recognizer.create_stream()
             s.accept_waveform(SR, np.asarray(samples, dtype=np.float32))
             recognizer.decode_stream(s)
@@ -229,7 +232,7 @@ def main():
             continue
         trimmed = audio[: loud[-1] + 1]
         rms = float(np.sqrt((trimmed ** 2).mean()))
-        padded_text, ms = da.ASREngine._decode_segment(recognizer, trimmed)
+        padded_text, ms = da_engine.ASREngine._decode_segment(recognizer, trimmed)
         bare_text = bare_decode(trimmed)
         is_speech = rms >= SPEECH_RMS
         if is_speech:
@@ -251,9 +254,9 @@ def main():
 
     # ---- 3. length floor -------------------------------------------------
     print("\n[3] minimum duration floor")
-    check("0.2 s (3200 samples) rejected", da.segment_too_short(3200) is True)
-    check("0.3 s (4800 samples) accepted", da.segment_too_short(4800) is False)
-    check("4799 samples rejected", da.segment_too_short(4799) is True)
+    check("0.2 s (3200 samples) rejected", da_engine.segment_too_short(3200) is True)
+    check("0.3 s (4800 samples) accepted", da_engine.segment_too_short(4800) is False)
+    check("4799 samples rejected", da_engine.segment_too_short(4799) is True)
 
     # ---- 4. queue path: ordering, rejection, overflow --------------------
     print("\n[4] decode queue end to end")
@@ -261,7 +264,7 @@ def main():
     short = segments[0][:3200]               # 0.2 s of real speech
     scripted = segments[:2] + [short] + segments[2:5]
 
-    references = [da.ASREngine._decode_segment(recognizer, s)[0] for s in segments[:5]]
+    references = [da_engine.ASREngine._decode_segment(recognizer, s)[0] for s in segments[:5]]
     # Sub-second segments of this recording are noise floor and decode to "";
     # the worker only emits non-empty text, so that is what we compare against.
     expected = [t for t in references if t]
@@ -314,7 +317,7 @@ def main():
 
     # ---- 6. real VAD smoke pass -----------------------------------------
     print("\n[6] real TEN VAD over real_uk_norm.wav")
-    full = load_wav(HERE / "real_uk_norm.wav")
+    full = load_wav(BENCH / "real_uk_norm.wav")
     blocks = [full[i:i + 1600].reshape(-1, 1) for i in range(0, len(full) - 1600, 1600)]
     engine, emitted, errors = new_engine(config)
     engine._stop_event.clear()
@@ -326,7 +329,7 @@ def main():
         holder["s"] = FakeStream(blocks, engine._stop_event.set)
         return holder["s"]
 
-    da.sd.InputStream = factory
+    da_engine.sd.InputStream = factory
     t0 = time.perf_counter()
     engine._run_offline()
     elapsed = time.perf_counter() - t0
@@ -335,15 +338,15 @@ def main():
           f"{words} words, {elapsed:.1f}s wall "
           f"({len(full)/SR/elapsed:.1f}x realtime)")
     print(f"  first block: {(emitted[0] if emitted else '')[:70]!r}")
-    # Baseline for this recording, from testing/segment_and_parakeet.py: 7 VAD
+    # Baseline for this recording, from bench/segment_and_parakeet.py: 7 VAD
     # segments, 19 words — most of the 58 s is noise floor, not speech.
     # Informational only — the assertion below does not depend on it, so a
     # missing fixture must not take the whole suite down with it.
     # Block count, not segment count: at the default coalesce_target_s the VAD
     # segments of this recording are merged before decoding (coalescing itself
-    # is covered in testing/test_hold_take.py), so what this pass still
+    # is covered in tests/test_hold_take.py), so what this pass still
     # guarantees is that the real VAD path transcribes the speech in it.
-    baseline_path = HERE / "out-parakeet.txt"
+    baseline_path = BENCH / "out-parakeet.txt"
     baseline = baseline_path.read_text() if baseline_path.exists() else ""
     joined = " ".join(emitted)
     print(f"  baseline (out-parakeet.txt): {len(baseline.split())} words")
@@ -360,7 +363,7 @@ def main():
     print("\n[7] diagnostics size cap")
     cap_path = HERE / ".test-diag-cap.log"
     cap_path.unlink(missing_ok=True)
-    small = da.DiagnosticLog(cap_path, max_bytes=4096)
+    small = da_diagnostics.DiagnosticLog(cap_path, max_bytes=4096)
     for i in range(400):
         small.log("filler", i=i, pad="x" * 40)
     size = cap_path.stat().st_size

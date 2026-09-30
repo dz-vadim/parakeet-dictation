@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parakeet-dictation"
+version = "2.0.0"
+description = "On-device push-to-talk voice dictation for KDE Plasma Wayland (sherpa-onnx)"
+requires-python = ">=3.12"
+dependencies = [
+    "sherpa-onnx>=1.12",
+    "sounddevice>=0.4",
+    "pynput>=1.7",
+    "numpy",
+    "PyGObject",
+    "ten-vad>=1.0.6",
+]
+
+[project.scripts]
+parakeet-dictation = "parakeet_dictation.app:main"
+
+[tool.setuptools.packages.find]
+include = ["parakeet_dictation*"]
+
+[tool.setuptools.package-data]
+parakeet_dictation = ["data/models.json"]

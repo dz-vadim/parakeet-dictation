@@ -23,7 +23,7 @@ release really does land mid-phrase) and the external binaries (wl-copy,
 wl-paste, ydotool), whose stand-in keeps an in-memory clipboard so what the
 "focused window" receives on each paste is observable.
 
-Run:  .venv/bin/python testing/test_hold_take.py
+Run:  .venv/bin/python tests/test_hold_take.py
 """
 
 import ast
@@ -36,12 +36,16 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
+BENCH = HERE.parent / "bench"   # fixture audio lives with the benchmark data
 sys.path.insert(0, str(HERE.parent))
 
-import dictation_app as da  # noqa: E402
+from parakeet_dictation import (audio as da_audio, config as da_config,  # noqa: E402
+                                controller as da_controller, diagnostics as da_diagnostics,
+                                engine as da_engine, insert as da_insert, models as da_models)
+from parakeet_dictation.ui import overlay as da_overlay  # noqa: E402
 from gi.repository import GLib  # noqa: E402
 
-SR = da.SAMPLE_RATE
+SR = da_audio.SAMPLE_RATE
 FAILURES = []
 
 
@@ -68,13 +72,13 @@ def trim(audio, thr=0.02):
     return audio[loud[0]:loud[-1] + 1] if len(loud) else audio
 
 
-SPEECH_A = trim(load_wav(HERE / "staging" / "s90.wav")[: 3 * SR])
-SPEECH_B = trim(load_wav(HERE / "segs" / "01.wav"))
-SPEECH_C = trim(load_wav(HERE / "segs" / "00.wav"))
-ROOM = load_wav(HERE / "segs" / "04.wav")   # -45 dBFS noise floor, not zeros
+SPEECH_A = trim(load_wav(BENCH / "staging" / "s90.wav")[: 3 * SR])
+SPEECH_B = trim(load_wav(BENCH / "segs" / "01.wav"))
+SPEECH_C = trim(load_wav(BENCH / "segs" / "00.wav"))
+ROOM = load_wav(BENCH / "segs" / "04.wav")   # -45 dBFS noise floor, not zeros
 
 # What the model makes of each piece on its own (checked in by observation, see
-# the header of testing/BENCHMARK.md for how these recordings were made):
+# the header of bench/BENCHMARK.md for how these recordings were made):
 #   A  "Навіть коли я говорю досить довго й не роблю па"   -> marker "навіть"
 #   B  "Open the settings and check whether the microphone works."
 #                                                          -> marker "microphone"
@@ -126,22 +130,24 @@ def fake_run(args, **_kw):
     return _Completed()
 
 
-da.subprocess.run = fake_run
-da.shutil.which = lambda name: f"/usr/bin/{name}" if name == "ydotool" else None
-da._kdotool_path = None          # no focused-window probe: use the configured chord
-da.play_beep_start = lambda *a, **k: None
-da.play_beep_stop = lambda *a, **k: None
-da.play_beep_pause = lambda *a, **k: None
-da.resolve_audio_device = lambda _value: None
+da_insert.subprocess.run = fake_run
+da_insert.shutil.which = lambda name: f"/usr/bin/{name}" if name == "ydotool" else None
+da_insert._kdotool_path = None          # no focused-window probe: use the configured chord
+da_engine.play_beep_start = lambda *a, **k: None
+da_engine.play_beep_stop = lambda *a, **k: None
+da_engine.play_beep_pause = lambda *a, **k: None
+da_engine.resolve_audio_device = lambda _value: None
 
 # Nothing here calls AppConfig.save(), but point it at a scratch file anyway:
 # a test must not be one refactor away from rewriting the user's real config.
-da.CONFIG_DIR = HERE
-da.CONFIG_FILE = HERE / ".test-hold-take-config.json"
+da_config.CONFIG_DIR = HERE
+da_config.CONFIG_FILE = HERE / ".test-hold-take-config.json"
 
 DIAG_PATH = HERE / ".test-hold-take.log"
 DIAG_PATH.unlink(missing_ok=True)
-da.DIAG = da.DiagnosticLog(DIAG_PATH)
+TEST_DIAG = da_diagnostics.DiagnosticLog(DIAG_PATH)
+for _mod in (da_engine, da_controller, da_insert, da_overlay):   # every module a take runs through
+    _mod.DIAG = TEST_DIAG
 
 
 def diag_lines():
@@ -192,11 +198,11 @@ class FakeOverlay:
         self.previews = []        # (t, accumulated text, segments, rows)
         self.hypotheses = []      # (t, hypothesis, committed text, rows)
         self.preview_resets = 0
-        self._config = config or da.AppConfig()
+        self._config = config or da_config.AppConfig()
         # The same gate the real PillOverlay applies, so "preview off" here
         # means what it means in the app.
         self._on = bool(self._config.overlay and self._config.preview)
-        self.panel = da.TranscriptPreview(self._config, clearance=84)
+        self.panel = da_overlay.TranscriptPreview(self._config, clearance=84)
 
     def set_state(self, state, message=""):
         self.states.append((time.monotonic(), state, message))
@@ -257,11 +263,11 @@ def run_take(audio, release_at_audio_s, insert_mode, label, preview=True,
     CLIP["text"] = USER_CLIPBOARD
     before = len(diag_lines())
 
-    config = da.AppConfig(hotkey_mode="hold", insert_mode=insert_mode,
+    config = da_config.AppConfig(hotkey_mode="hold", insert_mode=insert_mode,
                           preview=preview, coalesce_target_s=coalesce,
                           preview_interval_s=preview_interval,
                           normalize=normalize)
-    ctl = da.DictationController(config)
+    ctl = da_controller.DictationController(config)
     overlay = FakeOverlay(config)
     ctl.set_overlay(overlay)
 
@@ -271,7 +277,7 @@ def run_take(audio, release_at_audio_s, insert_mode, label, preview=True,
         mic["m"] = FakeMic(audio)
         return mic["m"]
 
-    da.sd.InputStream = factory
+    da_engine.sd.InputStream = factory
 
     marks = {}
     loop = GLib.MainLoop()
@@ -363,24 +369,24 @@ def overlay_next_after(overlay, t0):
 def part1_vad():
     print("\n[1] VAD: a thinking pause is no longer the end of a phrase")
     check("min_silence_duration defaults to 0.8 s",
-          da.TenVadDetector.__init__.__defaults__[1] == 0.8,
-          str(da.TenVadDetector.__init__.__defaults__[1]))
+          da_audio.TenVadDetector.__init__.__defaults__[1] == 0.8,
+          str(da_audio.TenVadDetector.__init__.__defaults__[1]))
     check("config default vad_min_silence is 0.8 s",
-          da.AppConfig().vad_min_silence == 0.8)
-    engine = da.ASREngine(da.AppConfig(vad_min_silence=1.4),
-                          da.load_model_profiles()["profiles"]["desktop"],
+          da_config.AppConfig().vad_min_silence == 0.8)
+    engine = da_engine.ASREngine(da_config.AppConfig(vad_min_silence=1.4),
+                          da_models.load_model_profiles()["profiles"]["desktop"],
                           on_text=None, on_partial=None, on_error=None)
     check("config value reaches the detector, not just the dataclass",
           engine._build_vad()._min_silence_samples == int(1.4 * SR),
           str(engine._build_vad()._min_silence_samples))
-    engine = da.ASREngine(da.AppConfig(vad_min_silence=0.0),
-                          da.load_model_profiles()["profiles"]["desktop"],
+    engine = da_engine.ASREngine(da_config.AppConfig(vad_min_silence=0.0),
+                          da_models.load_model_profiles()["profiles"]["desktop"],
                           on_text=None, on_partial=None, on_error=None)
     check("a nonsense config value is clamped, not obeyed",
           engine._build_vad()._min_silence_samples == int(0.1 * SR))
 
     def cuts_for(pause, min_silence):
-        vad = da.TenVadDetector(threshold=0.5, min_silence_duration=min_silence,
+        vad = da_audio.TenVadDetector(threshold=0.5, min_silence_duration=min_silence,
                                 min_speech_duration=0.25, max_speech_duration=30.0)
         take = np.concatenate([SPEECH_A, quiet(pause), SPEECH_B])
         cut = 0
@@ -405,20 +411,20 @@ def part1_vad():
           f"{len(vad05.front.samples) / SR:.2f} s pending")
 
     print("\n[2] VAD flush: the pending buffer is never silently dropped")
-    vad = da.TenVadDetector(min_silence_duration=0.8)
+    vad = da_audio.TenVadDetector(min_silence_duration=0.8)
     vad.accept_waveform(SPEECH_B[: int(0.6 * SR)].tolist())
     check("flush() reports that it emitted something", vad.flush() is True)
     check("flush() emitted the pending speech", not vad.empty())
-    vad = da.TenVadDetector(min_silence_duration=0.8)
+    vad = da_audio.TenVadDetector(min_silence_duration=0.8)
     vad.accept_waveform(SPEECH_B[: int(0.2 * SR)].tolist())
     emitted = vad.flush()
     check("flush() emits even below the VAD's own 0.25 s speech floor",
           emitted is True and not vad.empty(),
           "the 0.3 s recognizer floor is the only one allowed to drop it")
     check("and that buffer is what segment_too_short() then judges",
-          da.segment_too_short(len(vad.front.samples)) is True,
+          da_engine.segment_too_short(len(vad.front.samples)) is True,
           f"{len(vad.front.samples)} samples")
-    vad = da.TenVadDetector(min_silence_duration=0.8)
+    vad = da_audio.TenVadDetector(min_silence_duration=0.8)
     check("flush() with nothing pending is a no-op", vad.flush() is False)
 
 
@@ -429,7 +435,7 @@ def part1_vad():
 def preview_unit_checks():
     """TranscriptPreview on its own: the text model and the hard invariant."""
     print("\n[8] transcript preview: text model, wrapping, and no insertion")
-    panel = da.TranscriptPreview(da.AppConfig(), clearance=84)
+    panel = da_overlay.TranscriptPreview(da_config.AppConfig(), clearance=84)
 
     check("starts empty", panel.chars == 0 and panel.segments == 0
           and panel.rows == [])
@@ -454,10 +460,10 @@ def preview_unit_checks():
           all(chunk in panel.text for chunk in fed))
 
     rows = panel.rows
-    check(f"shows at most {da.TranscriptPreview.ROWS_MAX} rows "
-          f"({da.TranscriptPreview.ROWS_FULL} legible + "
-          f"{da.TranscriptPreview.ROWS_FADE} fading)",
-          0 < len(rows) <= da.TranscriptPreview.ROWS_MAX, f"{len(rows)} rows")
+    check(f"shows at most {da_overlay.TranscriptPreview.ROWS_MAX} rows "
+          f"({da_overlay.TranscriptPreview.ROWS_FULL} legible + "
+          f"{da_overlay.TranscriptPreview.ROWS_FADE} fading)",
+          0 < len(rows) <= da_overlay.TranscriptPreview.ROWS_MAX, f"{len(rows)} rows")
     check("the rows are the TAIL of the text, not its head",
           panel.text.endswith(rows[-1]), rows[-1][-40:])
     words = panel.text.split()
@@ -472,31 +478,31 @@ def preview_unit_checks():
     check("every row fits the panel's text column", not over,
           str([(r[:20], round(cr.text_extents(r)[4])) for r in over]))
     check("the panel is wider than the pill but fits the screen",
-          da.PillOverlay.WIDTH < panel.panel_width() <= da.TranscriptPreview.MAX_WIDTH,
+          da_overlay.PillOverlay.WIDTH < panel.panel_width() <= da_overlay.TranscriptPreview.MAX_WIDTH,
           f"{panel.panel_width()} px")
     check("height grows with the rows and stays two-ish lines tall",
-          panel.panel_height() == (da.TranscriptPreview.PAD_TOP
-                                   + len(rows) * da.TranscriptPreview.LINE_H
-                                   + da.TranscriptPreview.PAD_BOTTOM),
+          panel.panel_height() == (da_overlay.TranscriptPreview.PAD_TOP
+                                   + len(rows) * da_overlay.TranscriptPreview.LINE_H
+                                   + da_overlay.TranscriptPreview.PAD_BOTTOM),
           f"{panel.panel_height()} px for {len(rows)} rows")
 
-    single = da.TranscriptPreview(da.AppConfig(), clearance=84)
+    single = da_overlay.TranscriptPreview(da_config.AppConfig(), clearance=84)
     single.append("short")
     check("one short segment is one row, so the panel starts small",
           len(single.rows) == 1 and single.panel_height() < panel.panel_height(),
           f"{single.panel_height()} px vs {panel.panel_height()} px")
 
     long_word = "x" * 400
-    wide = da.TranscriptPreview(da.AppConfig(), clearance=84)
+    wide = da_overlay.TranscriptPreview(da_config.AppConfig(), clearance=84)
     wide.append(f"before {long_word} after")
     check("a word longer than a line is kept whole on a row of its own, not chopped",
           long_word in wide.rows, str([len(r) for r in wide.rows]))
 
-    huge = da.TranscriptPreview(da.AppConfig(), clearance=84)
+    huge = da_overlay.TranscriptPreview(da_config.AppConfig(), clearance=84)
     for i in range(400):
         huge.append(f"segment number {i} of a very long take")
     check("a very long take still lays out only a few rows",
-          len(huge.rows) <= da.TranscriptPreview.ROWS_MAX, f"{len(huge.rows)} rows")
+          len(huge.rows) <= da_overlay.TranscriptPreview.ROWS_MAX, f"{len(huge.rows)} rows")
     check("and the last row is still the end of the text",
           huge.text.endswith(huge.rows[-1]))
     check("no row starts with a half word after the tail cut",
@@ -508,7 +514,7 @@ def preview_unit_checks():
     # --- the hard invariant, behaviourally ---------------------------------
     PASTES.clear()
     CLIP["text"] = USER_CLIPBOARD
-    drum = da.TranscriptPreview(da.AppConfig(), clearance=84)
+    drum = da_overlay.TranscriptPreview(da_config.AppConfig(), clearance=84)
     for chunk in fed * 3:
         drum.append(chunk)
     time.sleep(0.3)
@@ -519,7 +525,7 @@ def preview_unit_checks():
     # --- the hard invariant, structurally ---------------------------------
     # Not "we did not call the typer" but "there is nothing here to call it
     # with": no insertion binary, no clipboard, no typer, no subprocess.
-    src = inspect.getsource(da.TranscriptPreview)
+    src = inspect.getsource(da_overlay.TranscriptPreview)
     tree = ast.parse(src)
     docstrings = set()
     for node in ast.walk(tree):
@@ -585,13 +591,13 @@ def preview_take_checks():
           str([len(t) for t in texts]))
     check("every segment that reached the preview also reached the insertion",
           all(carries(inserted, m) for m in (MARK_A, MARK_B, MARK_C)))
-    shown = da._WS_RE.sub(" ", texts[-1]).strip() if texts else ""
+    shown = da_insert._WS_RE.sub(" ", texts[-1]).strip() if texts else ""
     check("what the panel finally showed IS what was inserted",
           bool(pastes) and shown == pastes[0][1].strip(),
           f"panel={shown[:40]!r} inserted={pastes[0][1][:40]!r}" if pastes else "")
     rows = overlay.previews[-1][3] if overlay.previews else ()
     check("the panel stayed at a few bottom-anchored rows",
-          0 < len(rows) <= da.TranscriptPreview.ROWS_MAX, f"{len(rows)} rows")
+          0 < len(rows) <= da_overlay.TranscriptPreview.ROWS_MAX, f"{len(rows)} rows")
     check("the visible rows are the tail of what was inserted",
           bool(rows) and shown.endswith(rows[-1]), rows[-1][-40:] if rows else "")
 
@@ -630,7 +636,7 @@ def preview_take_checks():
 
 def vad_segments(audio, min_silence=0.8):
     """Run the real detector over `audio` and return the segments it closed."""
-    vad = da.TenVadDetector(min_silence_duration=min_silence)
+    vad = da_audio.TenVadDetector(min_silence_duration=min_silence)
     out = []
     for i in range(0, len(audio) - 1600 + 1, 1600):
         vad.accept_waveform(audio[i:i + 1600].tolist())
@@ -654,8 +660,8 @@ def contiguous_offset(haystack, needle):
 def part5_coalescing():
     print("\n[9] coalescing: short phrases reach the model as ONE block")
     check("coalesce_target_s defaults to 4.0 s",
-          da.AppConfig().coalesce_target_s == 4.0,
-          str(da.AppConfig().coalesce_target_s))
+          da_config.AppConfig().coalesce_target_s == 4.0,
+          str(da_config.AppConfig().coalesce_target_s))
 
     # Four different phrases, each well under 4 s, separated by 0.9 s of room
     # noise: long enough for the VAD to close every one of them, short enough
@@ -677,7 +683,7 @@ def part5_coalescing():
     check("and every one of them is under the 4 s target on its own",
           all(d < 4.0 for d in durs), str([round(d, 2) for d in durs]))
 
-    coalescer = da._BlockCoalescer(4.0)
+    coalescer = da_audio._BlockCoalescer(4.0)
     blocks = []
     for seg in segs:
         blocks.extend(coalescer.add(seg))
@@ -700,7 +706,7 @@ def part5_coalescing():
           offset is not None, f"offset={offset}")
 
     # target 0 restores one decode per VAD segment
-    off = da._BlockCoalescer(0.0)
+    off = da_audio._BlockCoalescer(0.0)
     raw = []
     for seg in segs:
         raw.extend(off.add(seg))
@@ -711,10 +717,10 @@ def part5_coalescing():
 
     # A pause too long to be context breaks the block instead of being carried.
     long_gap = np.concatenate([SPEECH_A[: int(1.6 * SR)],
-                               quiet(da.COALESCE_MAX_GAP_SAMPLES / SR + 1.5),
+                               quiet(da_audio.COALESCE_MAX_GAP_SAMPLES / SR + 1.5),
                                SPEECH_C[: int(1.6 * SR)], quiet(1.2)])
     gap_segs, _ = vad_segments(long_gap)
-    gap_c = da._BlockCoalescer(4.0)
+    gap_c = da_audio._BlockCoalescer(4.0)
     gap_blocks = []
     for seg in gap_segs:
         gap_blocks.extend(gap_c.add(seg))
@@ -743,10 +749,10 @@ def part5b_normalize():
     silence = np.zeros(2 * SR, dtype=np.float32)
     noise = at_dbfs(np.resize(ROOM, 2 * SR).astype(np.float32), -70.0)
 
-    out_loud, i_loud = da.normalize_for_model(loud, -18.0)
-    out_quiet, i_quiet = da.normalize_for_model(quiet_speech, -18.0)
-    out_sil, i_sil = da.normalize_for_model(silence, -18.0)
-    out_noise, i_noise = da.normalize_for_model(noise, -18.0)
+    out_loud, i_loud = da_audio.normalize_for_model(loud, -18.0)
+    out_quiet, i_quiet = da_audio.normalize_for_model(quiet_speech, -18.0)
+    out_sil, i_sil = da_audio.normalize_for_model(silence, -18.0)
+    out_noise, i_noise = da_audio.normalize_for_model(noise, -18.0)
     for tag, info in (("loud -13", i_loud), ("quiet -40", i_quiet),
                       ("silence", i_sil), ("noise -70", i_noise)):
         print(f"  {tag:10} gain_db={info['gain_db']:+6.1f} "
@@ -760,11 +766,11 @@ def part5b_normalize():
           f"{dbfs(out_loud):.1f} dBFS in, gain {i_loud['gain_db']:+.1f} dB")
     check("a quiet-but-real block IS boosted", i_quiet["gain_db"] > 10.0,
           f"{i_quiet['gain_db']:+.1f} dB")
-    check(f"never by more than {da.NORMALIZE_MAX_GAIN_DB:.0f} dB",
-          i_quiet["gain_db"] <= da.NORMALIZE_MAX_GAIN_DB + 0.01,
+    check(f"never by more than {da_audio.NORMALIZE_MAX_GAIN_DB:.0f} dB",
+          i_quiet["gain_db"] <= da_audio.NORMALIZE_MAX_GAIN_DB + 0.01,
           f"{i_quiet['gain_db']:+.1f} dB")
     check("and the peak stays under the ceiling, so nothing clips",
-          float(np.max(np.abs(out_quiet))) <= 10 ** (da.NORMALIZE_PEAK_DBFS / 20.0)
+          float(np.max(np.abs(out_quiet))) <= 10 ** (da_audio.NORMALIZE_PEAK_DBFS / 20.0)
           + 1e-6,
           f"peak {20 * np.log10(float(np.max(np.abs(out_quiet)))):.2f} dBFS")
     check("digital silence is not blown up",
@@ -776,16 +782,16 @@ def part5b_normalize():
 
     # MODEL ONLY: the captured samples the caller holds are never touched.
     before = quiet_speech.copy()
-    da.normalize_for_model(quiet_speech, -18.0)
+    da_audio.normalize_for_model(quiet_speech, -18.0)
     check("the gain lands on the copy handed to the model, never on the "
           "captured samples", np.array_equal(before, quiet_speech))
 
-    prepared, info = da.ASREngine._prepare_audio(quiet_speech, True, -18.0)
+    prepared, info = da_engine.ASREngine._prepare_audio(quiet_speech, True, -18.0)
     check("the decode path applies it and keeps the TDT's trailing pad",
-          len(prepared) == len(quiet_speech) + da.TAIL_PAD_SAMPLES
+          len(prepared) == len(quiet_speech) + da_engine.TAIL_PAD_SAMPLES
           and info["gain_db"] > 10.0,
           f"{len(prepared)} samples, {info['gain_db']:+.1f} dB")
-    bare, none_info = da.ASREngine._prepare_audio(quiet_speech, False, -18.0)
+    bare, none_info = da_engine.ASREngine._prepare_audio(quiet_speech, False, -18.0)
     check("normalize=False hands the model exactly what was captured",
           none_info is None
           and np.array_equal(bare[: len(quiet_speech)], quiet_speech))
@@ -843,7 +849,7 @@ def part5c_take():
           and all(carries(overlay.previews[-1][1], m)
                   for m in (MARK_A, MARK_B, MARK_C)),
           f"{len(overlay.previews)} updates")
-    shown = da._WS_RE.sub(" ", overlay.previews[-1][1]).strip() if overlay.previews else ""
+    shown = da_insert._WS_RE.sub(" ", overlay.previews[-1][1]).strip() if overlay.previews else ""
     check("what the panel finally showed IS what was inserted",
           bool(pastes) and shown == pastes[0][1].strip())
 
@@ -856,7 +862,7 @@ def part6_preview_pass():
     """Text on the panel while a phrase is still being spoken."""
     # s90.wav runs 12 s and its first VAD segment does not close until t=5 s:
     # before this pass existed the panel stayed empty for those five seconds.
-    take = load_wav(HERE / "staging" / "s90.wav")
+    take = load_wav(BENCH / "staging" / "s90.wav")
     release = 10.5
     cpu0 = time.process_time()
     marks, pastes, lines, overlay = run_take(
@@ -915,7 +921,7 @@ def part6_preview_pass():
           f"decoder")
     check("preview_pass logged with its duration and decode time",
           bool(ran) and all("dur_ms=" in l and "decode_ms=" in l for l in ran))
-    window = da.AppConfig().preview_window_s
+    window = da_config.AppConfig().preview_window_s
     over = [l for l in ran
             if float(l.split("dur_ms=")[1].split()[0]) > window * 1000 + 1]
     check(f"no pass decodes more than the {window:.0f} s window", not over,
@@ -954,7 +960,7 @@ def part3_clipboard():
     print("\n[6] clipboard save/restore across back-to-back insertions")
     PASTES.clear()
     CLIP["text"] = USER_CLIPBOARD
-    typer = da.TextTyper("clipboard", keep_on_clipboard=False)
+    typer = da_insert.TextTyper("clipboard", keep_on_clipboard=False)
     typer.type_text("first phrase")
     typer.type_text("second phrase")
     typer.type_text("third phrase")
@@ -973,8 +979,8 @@ def part3_clipboard():
 
 def main():
     # Load the model up front so the first take is not also a model load.
-    warm = da.ASREngine(da.AppConfig(),
-                        da.load_model_profiles()["profiles"]["desktop"],
+    warm = da_engine.ASREngine(da_config.AppConfig(),
+                        da_models.load_model_profiles()["profiles"]["desktop"],
                         on_text=None, on_partial=None, on_error=None)
     t0 = time.perf_counter()
     warm._acquire_offline_recognizer()
