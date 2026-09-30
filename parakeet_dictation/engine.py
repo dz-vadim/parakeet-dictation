@@ -424,7 +424,8 @@ class ASREngine:
         pending: queue.Queue = queue.Queue(maxsize=16)
         stats = {"segments": 0, "too_short": 0, "overflow": 0,
                  "queue_full": 0, "decode_ms": 0.0, "flushed": 0,
-                 "preview_passes": 0, "preview_skipped": 0, "preview_ms": 0.0}
+                 "preview_passes": 0, "preview_skipped": 0, "preview_ms": 0.0,
+                 "captured": 0}       # samples fed to the VAD — the preview's clock
         worker = threading.Thread(target=self._decode_worker,
                                   args=(pending, stats), daemon=True)
         worker.start()
@@ -510,6 +511,7 @@ class ASREngine:
                     with live_lock:
                         vad.accept_waveform(samples)
                         speech = vad.is_speech_detected()
+                        stats["captured"] += len(samples)
                     self._publish_level(audio, speech)
                     if speech:
                         GLib.idle_add(self._on_partial, "Listening...")
@@ -692,13 +694,18 @@ class ASREngine:
             return          # a failed preview must never take the take down
         if stop_event.is_set():
             return
-        last_len = 0
+        # "New audio since the last pass" is judged on the capture thread's
+        # running sample count, never on the size of the windowed audio: once
+        # an open phrase is longer than the window that size is constant, and
+        # judged on it the hypothesis froze after 15 s of continuous speech.
+        last_captured = -1
         showing = False
         while not stop_event.wait(interval):
             if self._paused:
                 continue
             with live_lock:
                 seq = coalescer.closed
+                captured = stats["captured"]
                 parts = [coalescer.tail(window), vad.open_tail(window)]
             audio = np.concatenate(parts)
             if audio.size > window:
@@ -709,9 +716,9 @@ class ASREngine:
                 if showing:
                     showing = False
                     GLib.idle_add(self._on_preview, "")
-                last_len = 0
+                last_captured = -1
                 continue
-            if audio.size == last_len:
+            if captured == last_captured:
                 continue    # no new audio since the last pass — same answer
             if not INFERENCE_LOCK.acquire(blocking=False):
                 stats["preview_skipped"] += 1
@@ -732,7 +739,7 @@ class ASREngine:
             if stop_event.is_set():
                 return      # the take ended mid-pass: this guess is history
             decode_ms = (time.perf_counter() - t0) * 1000
-            last_len = audio.size
+            last_captured = captured
             stats["preview_passes"] += 1
             stats["preview_ms"] += decode_ms
             stale = int(coalescer.closed != seq)

@@ -797,6 +797,60 @@ def review8_cli_download_is_atomic():
 
 
 # ---------------------------------------------------------------------------
+# #9  The preview pass must keep decoding while audio keeps arriving, even
+#     once the open phrase is longer than the window (the windowed size then
+#     never changes, which used to read as "no new audio").
+# ---------------------------------------------------------------------------
+
+class FullWindowVad:
+    """A phrase that has been open for longer than the preview window."""
+
+    def open_tail(self, max_samples):
+        return np.full(max_samples, 0.01, dtype=np.float32)
+
+
+class EmptyCoalescer:
+    closed = 0
+
+    def tail(self, _max):
+        return np.zeros(0, dtype=np.float32)
+
+
+def review9_preview_keeps_going_beyond_the_window():
+    print("\n[#9] the preview pass keeps producing hypotheses beyond the window")
+    previews = []
+    config = da_config.AppConfig(preview_interval_s=0.2, preview_window_s=1.0, normalize=False)
+    engine = da_engine.ASREngine(config, {"streaming": False, "files": {}},
+                                 on_text=None, on_partial=None, on_error=None,
+                                 on_preview=previews.append)
+    engine._acquire_offline_recognizer = lambda: (object(), 0.0)
+    saved = da_engine.ASREngine._decode_prepared
+    da_engine.ASREngine._decode_prepared = staticmethod(
+        lambda _rec, audio: f"guess after {len(previews) + 1} passes")
+    stats = {"preview_passes": 0, "preview_skipped": 0, "preview_ms": 0.0, "captured": 0}
+    stop, lock = threading.Event(), threading.Lock()
+    try:
+        worker = threading.Thread(target=engine._preview_worker,
+                                  args=(FullWindowVad(), EmptyCoalescer(), lock, stats, stop),
+                                  daemon=True)
+        worker.start()
+        for _ in range(12):                 # the capture thread: 100 ms blocks
+            time.sleep(0.1)
+            with lock:
+                stats["captured"] += 1600
+        stop.set()
+        worker.join(3)
+    finally:
+        da_engine.ASREngine._decode_prepared = saved
+    check("the pass keeps producing hypotheses while audio keeps coming",
+          stats["preview_passes"] >= 4, f"{stats['preview_passes']} passes in 1.2 s")
+    check("each of them reached the preview callback",
+          len(previews) == stats["preview_passes"] and len(set(previews)) == len(previews),
+          str(previews[-2:]))
+    check("the worker stopped with the session", not worker.is_alive())
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
             2: review2_take_ends_even_if_the_typer_raises,
@@ -805,7 +859,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             5: review5_recognizer_cache_keyed_on_language,
             6: review6_streaming_flushes_tail_on_stop,
             7: review7_press_while_stopping_is_queued,
-            8: review8_cli_download_is_atomic}
+            8: review8_cli_download_is_atomic,
+            9: review9_preview_keeps_going_beyond_the_window}
 
 
 def main(argv):
