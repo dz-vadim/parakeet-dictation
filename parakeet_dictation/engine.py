@@ -30,8 +30,11 @@ STOP_GRACE_S = 5.0
 # Loading the 640 MB Parakeet model costs ~1.6 s.  Doing that on every
 # dictation start meant the microphone was not open yet while it loaded, so the
 # first words of a take were physically lost.  One recognizer is kept alive for
-# the current (kind, profile, threads) triple and rebuilt only when that triple
-# changes; a single slot bounds RAM (~2 GB per loaded model).
+# the current (kind, profile, threads, language) key and rebuilt only when that
+# key changes; a single slot bounds RAM (~2 GB per loaded model).  The language
+# is part of the key because a Canary recognizer is built for one source and
+# target language (src_lang/tgt_lang); without it a language change in
+# Settings kept decoding in the old one.
 #
 # A sherpa-onnx recognizer is not safe for concurrent decoding, so *every*
 # inference call site in this file holds INFERENCE_LOCK.
@@ -44,7 +47,7 @@ _cached_key = None
 _cached_recognizer = None
 
 
-def get_recognizer(kind: str, profile_name: str, num_threads: int, build):
+def get_recognizer(kind: str, profile_name: str, num_threads: int, language: str, build):
     """Return the cached recognizer for this key, building it at most once.
 
     `build` is called with the cache lock held so two starts in quick
@@ -52,7 +55,7 @@ def get_recognizer(kind: str, profile_name: str, num_threads: int, build):
     load_ms is 0.0 on a cache hit.
     """
     global _cached_key, _cached_recognizer
-    key = (kind, profile_name, num_threads)
+    key = (kind, profile_name, num_threads, language)
     with _cache_lock:
         if _cached_key == key and _cached_recognizer is not None:
             return _cached_recognizer, 0.0
@@ -66,7 +69,8 @@ def get_recognizer(kind: str, profile_name: str, num_threads: int, build):
         _cached_recognizer = recognizer
         _cached_key = key
     DIAG.log("recognizer_loaded", kind=kind, profile=profile_name,
-             threads=num_threads, load_ms=load_ms, warmup_ms=warmup_ms)
+             threads=num_threads, language=language, load_ms=load_ms,
+             warmup_ms=warmup_ms)
     return recognizer, load_ms
 
 
@@ -245,14 +249,10 @@ class ASREngine:
         )
 
     def _acquire_offline_recognizer(self):
-        return get_recognizer("offline", self._config.model_profile,
-                              self._config.num_threads,
-                              self._build_offline_recognizer)
+        return get_recognizer("offline", *self._model_key, self._build_offline_recognizer)
 
     def _acquire_online_recognizer(self):
-        return get_recognizer("online", self._config.model_profile,
-                              self._config.num_threads,
-                              self._build_online_recognizer)
+        return get_recognizer("online", *self._model_key, self._build_online_recognizer)
 
     def preload(self):
         """Build and warm the recognizer ahead of the first dictation start."""

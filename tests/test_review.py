@@ -490,11 +490,69 @@ def review4_hotkey_rebuild_unsubscribes():
 
 
 # ---------------------------------------------------------------------------
+# #5  The recognizer cache is keyed on the language too: a Canary profile
+#     built for "en" must be rebuilt for "uk".
+# ---------------------------------------------------------------------------
+
+class FakeRecognizer:
+    def create_stream(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(accept_waveform=lambda *_a: None)
+
+    def decode_stream(self, _s):
+        pass
+
+    def is_ready(self, _s):
+        return False
+
+
+def review5_recognizer_cache_keyed_on_language():
+    print("\n[#5] the recognizer cache key includes the language")
+    saved = (da_engine._cached_key, da_engine._cached_recognizer)
+    builds = []
+
+    def build(tag):
+        def _b():
+            builds.append(tag)
+            return FakeRecognizer()
+        return _b
+
+    try:
+        before = len(diag_lines())
+        r1, _ = da_engine.get_recognizer("offline", "desktop", 4, "en", build("en"))
+        r2, ms = da_engine.get_recognizer("offline", "desktop", 4, "en", build("en-again"))
+        check("same profile, threads and language: a cache hit",
+              r2 is r1 and ms == 0.0 and builds == ["en"], str(builds))
+        r3, _ = da_engine.get_recognizer("offline", "desktop", 4, "uk", build("uk"))
+        check("a language change rebuilds the recognizer",
+              r3 is not r1 and builds == ["en", "uk"], str(builds))
+        r4, _ = da_engine.get_recognizer("offline", "desktop", 4, "en", build("en-back"))
+        check("(one slot: switching back rebuilds again)",
+              r4 is not r3 and builds == ["en", "uk", "en-back"], str(builds))
+        check("recognizer_loaded logs the language",
+              any("event=recognizer_loaded" in l and "language=uk" in l
+                  for l in diag_lines()[before:]))
+        e_en = da_engine.ASREngine(da_config.AppConfig(language="en"),
+                                   {"streaming": False, "files": {}},
+                                   on_text=None, on_partial=None, on_error=None)
+        e_uk = da_engine.ASREngine(da_config.AppConfig(language="uk"),
+                                   {"streaming": False, "files": {}},
+                                   on_text=None, on_partial=None, on_error=None)
+        check("ASREngine.recognizer_key carries the language",
+              e_en.recognizer_key != e_uk.recognizer_key
+              and e_en.recognizer_key[:3] == e_uk.recognizer_key[:3],
+              f"{e_en.recognizer_key} vs {e_uk.recognizer_key}")
+    finally:
+        da_engine._cached_key, da_engine._cached_recognizer = saved
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
             2: review2_take_ends_even_if_the_typer_raises,
             3: review3_apply_config_preloads_on_model_switch,
-            4: review4_hotkey_rebuild_unsubscribes}
+            4: review4_hotkey_rebuild_unsubscribes,
+            5: review5_recognizer_cache_keyed_on_language}
 
 
 def main(argv):
