@@ -851,6 +851,30 @@ def review9_preview_keeps_going_beyond_the_window():
 
 
 # ---------------------------------------------------------------------------
+# #10 _BlockCoalescer counts a block handed straight out (coalescing off) as
+#     closed, so the preview's staleness sequence still moves.
+# ---------------------------------------------------------------------------
+
+def review10_coalescer_disabled_counts_closed_blocks():
+    print("\n[#10] the disabled coalescer still bumps `closed`")
+    seg = da_audio._SpeechSegment(list(np.zeros(SR, dtype=np.float32)))
+    off = da_audio._BlockCoalescer(0.0)
+    check("coalescing off, nothing closed yet", not off.enabled and off.closed == 0)
+    blocks = off.add(seg)
+    check("add() hands the segment straight out as one block",
+          len(blocks) == 1 and blocks[0][1] == 1 and len(blocks[0][0]) == SR)
+    check("and counts it as closed", off.closed == 1, str(off.closed))
+    off.add(seg)
+    check("twice for two segments", off.closed == 2, str(off.closed))
+    check("flush() with nothing pending closes nothing", off.flush() == [] and off.closed == 2)
+    on = da_audio._BlockCoalescer(4.0)
+    on.add(seg)
+    check("(coalescing on: a pending block is not closed yet)", on.closed == 0)
+    on.flush()
+    check("(and flush closes it)", on.closed == 1)
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
             2: review2_take_ends_even_if_the_typer_raises,
@@ -860,7 +884,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             6: review6_streaming_flushes_tail_on_stop,
             7: review7_press_while_stopping_is_queued,
             8: review8_cli_download_is_atomic,
-            9: review9_preview_keeps_going_beyond_the_window}
+            9: review9_preview_keeps_going_beyond_the_window,
+            10: review10_coalescer_disabled_counts_closed_blocks}
 
 
 def main(argv):

@@ -403,6 +403,10 @@ class _BlockCoalescer:
         closes the block before it AND opens the next one.
         """
         if not self.enabled:
+            # Handed straight out, but still a closed block: `closed` is the
+            # preview's staleness sequence, and left unbumped here the guard
+            # was inert and committed words were doubled on the panel.
+            self.closed += 1
             return [(np.asarray(segment.samples, dtype=np.float32), 1)]
         ready = []
         if self._parts:
