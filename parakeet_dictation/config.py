@@ -19,6 +19,20 @@ APP_DIR = Path(__file__).resolve().parent.parent   # the checkout root, as befor
 DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / APP_ID
 MODELS_DIR = DATA_DIR / "models"
 
+# Window classes (KWin resourceClass) that need Ctrl+Shift+V: Ctrl+V is
+# destructive in a terminal (it delivers VLNEXT and eats the next key).  The
+# config carries its own, editable copy; this is the seed for it, and
+# insert.py's fallback for a typer built without a config.  One list, here:
+# insert.py used to keep a second copy that could drift from this one.
+DEFAULT_TERMINAL_CLASSES = [
+    "kitty", "Alacritty", "alacritty", "org.kde.konsole", "konsole",
+    "yakuake", "foot", "footclient", "org.wezfurlong.wezterm", "wezterm",
+    "com.mitchellh.ghostty", "XTerm", "xterm", "st", "contour",
+    "gnome-terminal-server", "terminator", "com.gexperts.Tilix",
+]
+# Classes where Ctrl+V is not paste at all; Shift+Insert is.
+DEFAULT_NO_CTRL_V_CLASSES = ["emacs", "Emacs"]
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -102,13 +116,10 @@ class AppConfig:
     keep_on_clipboard: bool = False
     paste_chord: str = "ctrl+v"
     terminal_paste_chord: str = "ctrl+shift+v"
-    terminal_window_classes: list = field(default_factory=lambda: [
-        "kitty", "Alacritty", "alacritty", "org.kde.konsole", "konsole",
-        "yakuake", "foot", "footclient", "org.wezfurlong.wezterm", "wezterm",
-        "com.mitchellh.ghostty", "XTerm", "xterm", "st", "contour",
-        "gnome-terminal-server", "terminator", "com.gexperts.Tilix",
-    ])
-    no_ctrl_v_classes: list = field(default_factory=lambda: ["emacs", "Emacs"])
+    terminal_window_classes: list = field(
+        default_factory=lambda: list(DEFAULT_TERMINAL_CLASSES))
+    no_ctrl_v_classes: list = field(
+        default_factory=lambda: list(DEFAULT_NO_CTRL_V_CLASSES))
     paste_overrides: dict = field(default_factory=dict)
 
     # How the chord is pressed: "portal" (xdg-desktop-portal RemoteDesktop,

@@ -1169,7 +1169,7 @@ def main():
     part1_vad()
     part2_insertion()
 
-    # ---- the user's scenario, in the shipping default (per_segment) --------
+    # ---- the user's scenario, per_segment (the pre-hold-mode default) -------
     take1 = np.concatenate([SPEECH_A, quiet(0.5), SPEECH_B, SPEECH_C])
     release1 = (len(SPEECH_A) + len(SPEECH_B)) / SR + 0.5 + 2.0
     marks, pastes, lines, overlay = run_take(

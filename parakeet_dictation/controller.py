@@ -193,9 +193,10 @@ class DictationController:
     def _insert_at_end(self) -> bool:
         """Whether decoded text is held back until the take is over.
 
-        Hold mode has a natural end, so holding text back is possible there at
-        all; a toggle session may run for minutes, which is why per-segment
-        stays the default and this stays a setting.
+        Hold mode has a natural end, so holding text back is possible there
+        at all — and required (see AppConfig.insert_mode): end_of_take is the
+        default.  A toggle session may run for minutes, which is why
+        per-segment still exists as a setting for that mode.
         """
         return self._config.insert_mode == "end_of_take"
 

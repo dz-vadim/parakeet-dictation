@@ -38,6 +38,7 @@ from types import SimpleNamespace
 from gi.repository import Gio, GLib
 
 from . import config as _config
+from .config import DEFAULT_NO_CTRL_V_CLASSES, DEFAULT_TERMINAL_CLASSES
 from .diagnostics import DIAG
 
 
@@ -90,16 +91,9 @@ _CHORD_KEYSYMS = {
 
 CHORDS = tuple(_CHORD_KEYCODES)
 
-# Window classes (KWin resourceClass) that need Ctrl+Shift+V.  The config
-# carries its own copy of this list; this is the seed for it.
-DEFAULT_TERMINAL_CLASSES = [
-    "kitty", "Alacritty", "alacritty", "org.kde.konsole", "konsole", "yakuake",
-    "foot", "footclient", "org.wezfurlong.wezterm", "wezterm",
-    "com.mitchellh.ghostty", "XTerm", "xterm", "st", "contour",
-    "gnome-terminal-server", "terminator", "com.gexperts.Tilix",
-]
-# Classes where Ctrl+V is not paste at all; Shift+Insert is.
-DEFAULT_NO_CTRL_V_CLASSES = ["emacs", "Emacs"]
+# The terminal and no-Ctrl+V class tables live in config.py
+# (DEFAULT_TERMINAL_CLASSES, DEFAULT_NO_CTRL_V_CLASSES): the config carries
+# the user's editable copy, and this module reads whichever it is handed.
 
 # Delay between staging the selections and pressing the chord: wl-copy's
 # ownership lands on the next compositor round trip.
@@ -113,6 +107,18 @@ _DETECT_FOCUS, _DETECT_CONFIG, _DETECT_NONE = "focus", "config", "none"
 
 def _lower_set(items) -> set:
     return {str(c).lower() for c in (items or [])}
+
+
+def is_terminal_class(cls, config) -> bool:
+    """Whether `cls` is in the config's terminal table (case-insensitive).
+
+    The one definition of "this window is a terminal": choose_chord() picks
+    the chord from it, and prepare_for_target() its newline rule.  Keying the
+    latter on the chord instead, as this did, made a per-class chord
+    override change the newline handling too.
+    """
+    low = str(cls or "").lower()
+    return bool(low) and low in _lower_set(getattr(config, "terminal_window_classes", None))
 
 
 def choose_chord(cls, config) -> tuple:
@@ -138,7 +144,7 @@ def choose_chord(cls, config) -> tuple:
     for key, chord in overrides.items():
         if str(key).lower() == low and str(chord).lower() in _CHORD_KEYCODES:
             return str(chord).lower(), _DETECT_CONFIG
-    if low in _lower_set(getattr(config, "terminal_window_classes", None)):
+    if is_terminal_class(low, config):
         return terminal_chord, _DETECT_FOCUS
     if low in _lower_set(getattr(config, "no_ctrl_v_classes", None)):
         return CHORD_SHIFT_INSERT, _DETECT_FOCUS
@@ -152,6 +158,11 @@ def prepare_for_target(text: str, terminal: bool) -> str:
     chats), so it always goes.  Terminals execute multi-line pastes when
     bracketed paste is off (foot/alacritty/VTE) or pop a modal that swallows
     the paste (kitty), so for them internal newlines collapse to spaces too.
+
+    `terminal` comes from is_terminal_class(), never from the chord.  On the
+    dictation path TextTyper._sanitize has already removed every newline
+    (nothing dictated may ever inject Enter, in any app), so this is the
+    net under any caller that stages text without going through it.
     """
     text = text.rstrip("\r\n")
     if terminal:
@@ -600,7 +611,7 @@ class TextTyper:
         """Stage *text* on both selections, press the chord, restore later."""
         cls = target_class(target)
         chord, detect = choose_chord(cls, self._chord_config)
-        text = prepare_for_target(text, terminal=(chord == CHORD_CTRL_SHIFT_V))
+        text = prepare_for_target(text, terminal=is_terminal_class(cls, self._chord_config))
         if not text:
             return
         saved, gen = None, 0

@@ -1069,6 +1069,34 @@ def review14_insertion_off_thread_and_batched_backspaces():
 
 
 # ---------------------------------------------------------------------------
+# #15 Cleanups (no behaviour change): one source for the class tables, and
+#     the staging newline rule keyed on the class, not the chord.
+# ---------------------------------------------------------------------------
+
+def review15_cleanups_single_source_tables():
+    print("\n[#15] cleanups: one class table, terminal flag from the class")
+    check("config.py owns the terminal table and insert.py reads that very list",
+          da_insert.DEFAULT_TERMINAL_CLASSES is da_config.DEFAULT_TERMINAL_CLASSES)
+    check("same for the no-Ctrl+V table",
+          da_insert.DEFAULT_NO_CTRL_V_CLASSES is da_config.DEFAULT_NO_CTRL_V_CLASSES)
+    cfg = da_config.AppConfig()
+    check("AppConfig's defaults are copies of them, not shared lists",
+          cfg.terminal_window_classes == da_config.DEFAULT_TERMINAL_CLASSES
+          and cfg.terminal_window_classes is not da_config.DEFAULT_TERMINAL_CLASSES
+          and cfg.no_ctrl_v_classes == da_config.DEFAULT_NO_CTRL_V_CLASSES)
+    check("a typer built without a config falls back to the same table",
+          da_insert.TextTyper("clipboard").chord_config.terminal_window_classes
+          == da_config.DEFAULT_TERMINAL_CLASSES)
+    is_term = da_insert.is_terminal_class
+    check("is_terminal_class follows the config table, case-insensitively",
+          is_term("kitty", cfg) and is_term("KITTY", cfg) and not is_term("chromium", cfg)
+          and not is_term("", cfg) and not is_term(None, cfg))
+    over = da_config.AppConfig(paste_overrides={"kitty": "shift+insert"})
+    check("a chord override does not un-terminal a terminal",
+          da_insert.choose_chord("kitty", over)[0] == "shift+insert" and is_term("kitty", over))
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
             2: review2_take_ends_even_if_the_typer_raises,
@@ -1083,7 +1111,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             11: review11_test_defects_runs_main_on_a_scratch_config,
             12: review12_tests_locate_the_checkout_from_file,
             13: review13_focus_snapshot_is_cache_only,
-            14: review14_insertion_off_thread_and_batched_backspaces}
+            14: review14_insertion_off_thread_and_batched_backspaces,
+            15: review15_cleanups_single_source_tables}
 
 
 def main(argv):
