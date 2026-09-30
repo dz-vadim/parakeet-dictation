@@ -126,7 +126,7 @@ class _SpeechSegment:
     """
     __slots__ = ("samples", "lead")
 
-    def __init__(self, samples: list[float], lead=None):
+    def __init__(self, samples: np.ndarray, lead=None):
         self.samples = samples
         self.lead = lead
 
@@ -147,7 +147,7 @@ class TenVadDetector:
         self._vad = TenVad(hop_size=self._hop_size, threshold=threshold)
 
         # Internal state
-        self._buffer: list[float] = []  # float32 samples for ASR
+        self._buffer: list = []  # float32 hop-sized chunks for ASR
         self._int16_remainder = np.array([], dtype=np.int16)  # leftover for VAD
         self._float_remainder = np.zeros(0, dtype=np.float32)  # its float twin
         self._in_speech = False
@@ -188,7 +188,7 @@ class TenVadDetector:
             prob, _flag = self._vad.process(chunk)
             is_speech = prob >= self._threshold
 
-            float_chunk = arr[i:i + self._hop_size].tolist()
+            float_chunk = arr[i:i + self._hop_size].copy()
 
             if is_speech:
                 self._is_speech = True
@@ -197,7 +197,7 @@ class TenVadDetector:
                     self._in_speech = True
                     self._speech_samples = 0
                     self._lead = self._take_gap()
-                self._buffer.extend(float_chunk)
+                self._buffer.append(float_chunk)
                 self._speech_samples += self._hop_size
 
                 # Force segment if max duration reached
@@ -205,7 +205,7 @@ class TenVadDetector:
                     self._emit_segment()
             else:
                 if self._in_speech:
-                    self._buffer.extend(float_chunk)
+                    self._buffer.append(float_chunk)
                     self._silence_samples += self._hop_size
                     if self._silence_samples >= self._min_silence_samples:
                         self._emit_segment()
@@ -233,19 +233,19 @@ class TenVadDetector:
         hallucinated words.
         """
         if force or self._speech_samples >= self._min_speech_samples:
-            self._segments.append(_SpeechSegment(list(self._buffer), self._lead))
+            self._segments.append(_SpeechSegment(np.concatenate(self._buffer), self._lead))
         elif self._lead is not None:
             # A blip too short to be speech: what was buffered is part of the
             # pause it interrupted, so it goes back into the gap and the
             # contiguous span across that pause stays whole for the coalescer.
-            self._gap = [self._lead, np.asarray(self._buffer, dtype=np.float32)]
-            self._gap_samples = len(self._lead) + len(self._buffer)
+            self._gap = [self._lead, *self._buffer]
+            self._gap_samples = len(self._lead) + len(self._buffer) * self._hop_size
             if self._gap_samples > self._max_gap_samples:
                 self._gap = None
         else:
             self._gap = None      # the pause was already past the carry cap
         self._lead = None
-        self._buffer.clear()
+        self._buffer = []
         self._in_speech = False
         self._speech_samples = 0
         self._silence_samples = 0
@@ -255,7 +255,7 @@ class TenVadDetector:
         """Keep one hop of the pause, for the coalescer's contiguous span."""
         if self._gap is None:
             return
-        self._gap.append(np.asarray(chunk, dtype=np.float32))
+        self._gap.append(chunk)
         self._gap_samples += len(chunk)
         if self._gap_samples > self._max_gap_samples:
             self._gap = None          # too long to belong inside one block
@@ -277,9 +277,11 @@ class TenVadDetector:
         buf = self._buffer
         if not buf:
             return np.zeros(0, dtype=np.float32)
-        if max_samples and len(buf) > max_samples:
-            buf = buf[-max_samples:]
-        return np.asarray(buf, dtype=np.float32)
+        if max_samples:
+            chunks = -(-max_samples // self._hop_size)        # ceil(max / hop)
+            buf = buf[-chunks:]
+        audio = np.concatenate(buf)
+        return audio[-max_samples:] if max_samples and audio.size > max_samples else audio
 
     def is_speech_detected(self) -> bool:
         return self._is_speech
@@ -335,7 +337,7 @@ def normalize_for_model(samples, target_dbfs: float = -18.0):
             "clipped": 0}
     if not audio.size:
         return audio, info
-    rms_in = float(np.sqrt(np.mean(audio.astype(np.float32) ** 2)))
+    rms_in = float(np.sqrt(np.mean(audio ** 2)))
     if not (rms_in > 0.0) or not math.isfinite(rms_in):
         return audio, info
     rms_in_db = 20.0 * math.log10(rms_in)
@@ -360,7 +362,7 @@ def normalize_for_model(samples, target_dbfs: float = -18.0):
         info["clipped"] = 1
     if abs(gain_db) < 0.1:
         return audio, info
-    out = (audio * np.float32(gain)).astype(np.float32)
+    out = audio * np.float32(gain)
     info["gain_db"] = round(gain_db, 1)
     info["rms_out_db"] = round(rms_in_db + gain_db, 1)
     return out, info

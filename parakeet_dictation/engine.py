@@ -507,7 +507,7 @@ class ASREngine:
                         if now - last_overflow_log > 5.0:
                             last_overflow_log = now
                             DIAG.log("audio_overflow", count=stats["overflow"])
-                    samples = audio.reshape(-1).tolist()
+                    samples = audio.reshape(-1)
                     with live_lock:
                         vad.accept_waveform(samples)
                         speech = vad.is_speech_detected()
@@ -644,7 +644,7 @@ class ASREngine:
     def _decode_prepared(recognizer, audio) -> str:
         """Run one decode.  The caller must already hold INFERENCE_LOCK."""
         stream = recognizer.create_stream()
-        stream.accept_waveform(SAMPLE_RATE, audio)
+        stream.accept_waveform(SAMPLE_RATE, audio.tolist())
         recognizer.decode_stream(stream)
         return stream.result.text.strip()
 
@@ -801,7 +801,7 @@ class ASREngine:
                     if now - last_overflow_log > 5.0:
                         last_overflow_log = now
                         DIAG.log("audio_overflow", count=overflow)
-                samples = audio.reshape(-1).tolist()
+                samples = audio.reshape(-1)
                 self._publish_level(audio, speaking)
                 stream.accept_waveform(SAMPLE_RATE, samples)
 
