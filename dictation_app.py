@@ -919,7 +919,8 @@ def normalize_for_model(samples, target_dbfs: float = -18.0):
 
     The gain is bounded three ways, because an unbounded one turns silence into
     a hallucination generator:
-      * never more than NORMALIZE_MAX_GAIN_DB,
+      * never more than NORMALIZE_MAX_GAIN_DB, and never below 0 dB — a block
+        already at or above the target is passed through unchanged,
       * nothing below NORMALIZE_NOISE_FLOOR_DBFS is lifted at all (that is room
         noise, not quiet speech),
       * scaled back if it would push the peak past NORMALIZE_PEAK_DBFS, so a
@@ -940,11 +941,16 @@ def normalize_for_model(samples, target_dbfs: float = -18.0):
         # Digital noise: leave it exactly as captured.  A block this quiet
         # decodes to nothing, which is the correct answer for it.
         return audio, info
-    gain_db = min(target_dbfs - rms_in_db, NORMALIZE_MAX_GAIN_DB)
+    # Boost only.  Attenuating a loud take cost ~2 errors on the read-aloud
+    # benchmark (19.5 % -> 21.2 % WER); every measured win came from lifting
+    # quiet speech, so a block already at or above the target is left alone.
+    gain_db = max(0.0, min(target_dbfs - rms_in_db, NORMALIZE_MAX_GAIN_DB))
     gain = 10.0 ** (gain_db / 20.0)
     peak = float(np.max(np.abs(audio)))
     ceiling = 10.0 ** (NORMALIZE_PEAK_DBFS / 20.0)
-    if peak * gain > ceiling:
+    # The ceiling only matters when we are actually boosting; an unboosted block
+    # must reach the model exactly as captured, peaks and all.
+    if gain_db > 0.0 and peak * gain > ceiling:
         gain = ceiling / peak
         gain_db = 20.0 * math.log10(gain)
         info["clipped"] = 1

@@ -755,8 +755,9 @@ def part5b_normalize():
 
     check("a loud block is NOT amplified", i_loud["gain_db"] <= 0.0,
           f"{i_loud['gain_db']:+.1f} dB")
-    check("and it lands on the target", abs(dbfs(out_loud) + 18.0) < 0.6,
-          f"{dbfs(out_loud):.1f} dBFS")
+    check("and it is passed through unchanged (boost only, never attenuate)",
+          i_loud["gain_db"] == 0.0 and abs(dbfs(out_loud) - dbfs(loud)) < 0.01,
+          f"{dbfs(out_loud):.1f} dBFS in, gain {i_loud['gain_db']:+.1f} dB")
     check("a quiet-but-real block IS boosted", i_quiet["gain_db"] > 10.0,
           f"{i_quiet['gain_db']:+.1f} dB")
     check(f"never by more than {da.NORMALIZE_MAX_GAIN_DB:.0f} dB",
