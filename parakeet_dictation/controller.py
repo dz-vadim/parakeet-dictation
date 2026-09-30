@@ -60,6 +60,7 @@ class DictationController:
         self._overlay = None
         self._gesture = GESTURE_IDLE
         self._stop_pending = False       # a release that landed mid-start
+        self._start_pending = False      # a press that landed mid-stop
         self._tail_source = 0
         self._tail_scheduled = False
         self._take_seq = 0
@@ -276,7 +277,19 @@ class DictationController:
     # --- push-to-talk gesture ---------------------------------------------
 
     def hold_press(self):
-        """Key down.  A press while a take is in flight is a repeat, not a start."""
+        """Key down.  A press while a take is being captured is a key repeat.
+
+        A press while the previous take is still STOPPING (its 200 ms tail,
+        the decoder drain, the insertion) is the NEXT take: it is held and
+        opened by _end_take the moment that one is over.  Dropping it as a
+        repeat, as this did, cost a fast re-press the first second of the
+        next sentence — the user had to notice, let go and press again.
+        """
+        if self._gesture == GESTURE_STOPPING:
+            if not self._start_pending:
+                self._start_pending = True
+                DIAG.log("hold_press_queued", take=self._take_seq)
+            return
         if self._gesture != GESTURE_IDLE:
             DIAG.log("hold_press_ignored", state=self._gesture, take=self._take_seq)
             return
@@ -310,7 +323,14 @@ class DictationController:
             self._overlay_state("processing")
             DIAG.log("stop_deferred", take=self._take_seq)
         elif self._gesture == GESTURE_STOPPING:
-            DIAG.log("stop_rejected", reason="already_stopping", take=self._take_seq)
+            if self._start_pending:
+                # Pressed AND released inside the stop window: the microphone
+                # was never available to that press, so there is nothing to
+                # open once the take ends.
+                self._start_pending = False
+                DIAG.log("queued_start_cancelled", take=self._take_seq)
+            else:
+                DIAG.log("stop_rejected", reason="already_stopping", take=self._take_seq)
         else:
             DIAG.log("stop_rejected", reason="not_recording", take=self._take_seq)
             self._overlay_state("error", "Nothing to stop — press and hold to dictate")
@@ -411,10 +431,12 @@ class DictationController:
             DIAG.log("take_insert_error", err=type(e).__name__, take=take)
             print(f"ERROR: insertion failed: {type(e).__name__}: {e}", file=sys.stderr)
         finally:
-            self._end_take(outcome, reason)
+            # Pill before _end_take: a start queued behind this take opens
+            # from there and puts its own "preparing" on the pill.
             self._overlay_state(pill, message)
             if self._status_callback:
                 self._status_callback("")
+            self._end_take(outcome, reason)
         return GLib.SOURCE_REMOVE
 
     def _flush_take_text(self):
@@ -474,8 +496,14 @@ class DictationController:
         DIAG.log("take_end", outcome=outcome, reason=reason, take=self._take_seq,
                  texts=self._take_texts, inserts=self._take_inserts,
                  tail_scheduled=self._tail_scheduled)
+        # A press that landed while this take was stopping opens the next
+        # one — but only after a normal end.  After a cancel, an engine error
+        # or a shutdown there is nothing sensible to open it against.
+        queued = self._start_pending
+        reopen = queued and outcome in ("success", "no_speech")
         self._take_closed = self._take_seq
         self._stop_pending = False
+        self._start_pending = False
         self._tail_scheduled = False
         self._take_texts = 0
         self._take_chunks = []
@@ -484,6 +512,14 @@ class DictationController:
         self._last_insert_t = 0.0
         self._focus_at_release = None
         self._enter(GESTURE_IDLE, outcome)
+        if reopen:
+            # The engine handles the hand-over: a start that finds the
+            # previous session still draining is queued behind it (see
+            # ASREngine.start), so the microphone is never held twice.
+            DIAG.log("queued_start_applied", after=self._take_seq)
+            self.start()
+        elif queued:
+            DIAG.log("queued_start_dropped", outcome=outcome, take=self._take_seq)
 
     def pause(self):
         self._engine.pause()

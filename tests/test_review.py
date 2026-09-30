@@ -648,13 +648,85 @@ def review6_streaming_flushes_tail_on_stop():
 
 
 # ---------------------------------------------------------------------------
+# #7  A press during the STOPPING window is a queued start, not a dropped
+#     key repeat: the next take opens by itself once the previous one ends.
+# ---------------------------------------------------------------------------
+
+def review7_press_while_stopping_is_queued():
+    print("\n[#7] a press while stopping queues the next take")
+    inserted = []
+
+    class RecordingTyper(da_insert.TextTyper):
+        def _type_raw(self, text, target=None):
+            inserted.append(text)
+
+    ctl, eng, _ov = make_controller()
+    ctl._typer = RecordingTyper("clipboard")
+    ctl.hold_press()
+    capture_up(ctl, eng)
+    ctl._on_final_text("first take")
+    ctl.hold_release()
+    check("release puts the gesture at stopping", ctl.gesture == "stopping", ctl.gesture)
+    before = len(diag_lines())
+    ctl.hold_press()                       # before the release tail has even fired
+    check("the press is logged as queued, not ignored",
+          any("event=hold_press_queued" in l for l in diag_lines()[before:])
+          and not any("event=hold_press_ignored" in l for l in diag_lines()[before:]),
+          str([l.split("event=")[1][:40] for l in diag_lines()[before:]]))
+    check("no second session is opened while the first is still stopping",
+          eng.starts == 1, f"starts={eng.starts}")
+    opened = pump_until(lambda: eng.starts == 2, 4000)
+    check("the next take opens by itself once the previous one has ended",
+          opened and ctl.gesture == "starting", f"starts={eng.starts} gesture={ctl.gesture}")
+    lines = diag_lines()[before:]
+    ends = [i for i, l in enumerate(lines) if "event=take_end" in l and "take=1" in l]
+    starts = [i for i, l in enumerate(lines) if "event=gesture" in l and "to=starting" in l]
+    check("take 1 ended before take 2 started", ends and starts and ends[0] < starts[0],
+          f"end at {ends[:1]}, start at {starts[:1]}")
+    wait_typer(ctl._typer)
+    check("the first take's text was inserted — nothing lost",
+          [t.strip() for t in inserted] == ["first take"], str(inserted))
+    capture_up(ctl, eng)
+    check("capture up moves the queued take to recording", ctl.gesture == "recording",
+          ctl.gesture)
+    check("_decide_stop on its release is PROCEED",
+          ctl._decide_stop() == da_controller.STOP_PROCEED, ctl._decide_stop())
+    ctl._on_final_text("second take")
+    ctl.hold_release()
+    ended = pump_until(lambda: ctl.gesture == "idle", 4000)
+    wait_typer(ctl._typer)
+    check("the second take ends normally", ended and eng.stops == 2,
+          f"gesture={ctl.gesture} stops={eng.stops}")
+    check("both takes reached the document, in order",
+          [t.strip() for t in inserted] == ["first take", "second take"], str(inserted))
+
+    # A press AND release inside the window: nothing could be captured, so
+    # nothing is queued.
+    before = len(diag_lines())
+    ctl.hold_press()
+    capture_up(ctl, eng)
+    ctl.hold_release()
+    ctl.hold_press()
+    ctl.hold_release()
+    pump_until(lambda: ctl.gesture == "idle", 4000)
+    pump(300)
+    check("a tap that ends inside the stop window opens no take",
+          eng.starts == 3 and ctl.gesture == "idle",
+          f"starts={eng.starts} gesture={ctl.gesture}")
+    check("and says so in the log",
+          any("event=queued_start_cancelled" in l for l in diag_lines()[before:]))
+    ctl.shutdown()
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
             2: review2_take_ends_even_if_the_typer_raises,
             3: review3_apply_config_preloads_on_model_switch,
             4: review4_hotkey_rebuild_unsubscribes,
             5: review5_recognizer_cache_keyed_on_language,
-            6: review6_streaming_flushes_tail_on_stop}
+            6: review6_streaming_flushes_tail_on_stop,
+            7: review7_press_while_stopping_is_queued}
 
 
 def main(argv):
