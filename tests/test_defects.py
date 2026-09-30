@@ -953,13 +953,42 @@ def defect11_hold_mode_defaults_and_guard():
 
 
 # ---------------------------------------------------------------------------
+# #12 models.py tells the truth about the VAD: TEN VAD comes from pip, no
+#     silero_vad.onnx is downloaded, and no dead entry describes one.
+# ---------------------------------------------------------------------------
+
+def defect12_vad_text_truthful():
+    print("\n[#12] models.py and models.json are truthful about the VAD")
+    import inspect
+    from parakeet_dictation import models as da_models
+    doc = da_models.__doc__ or ""
+    check("the CLI help no longer claims to download a VAD",
+          "+ VAD" not in doc and "silero" not in doc.lower(), doc.splitlines()[4:5])
+    check("the CLI help says where the VAD really comes from",
+          "ten-vad" in doc.lower() or "ten vad" in doc.lower(), doc[:200])
+    src = inspect.getsource(da_models)
+    check("no silero reference survives in the module", "silero" not in src.lower())
+    check("no VAD download machinery survives",
+          not hasattr(da_models, "_ensure_vad") and not hasattr(da_models, "download_vad")
+          and "VAD" not in inspect.getsource(da_models._download_model)
+          and "VAD" not in inspect.getsource(da_models._download_all_models))
+    data = da_models.load_model_profiles()
+    check("models.json carries no dead vad entry",
+          "vad" not in data and set(data) == {"profiles"}, str(sorted(data)))
+    check("the profiles themselves are untouched",
+          set(data["profiles"]) == {"desktop", "laptop", "streaming"},
+          str(sorted(data["profiles"])))
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = [defect2_config_load, defect3_engine_stop,
             defect4_single_instance, defect5_missing_helper_named,
             defect6_clipboard_verbatim, defect7_overlay_fallback_honest,
             defect8_model_hint, defect9_thread_default,
             defect10_focus_log_on_change,
-            defect11_hold_mode_defaults_and_guard]
+            defect11_hold_mode_defaults_and_guard,
+            defect12_vad_text_truthful]
 
 
 def main():

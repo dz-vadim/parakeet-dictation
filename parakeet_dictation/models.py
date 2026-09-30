@@ -2,11 +2,15 @@
 """Model profiles: models.json access, downloads, legacy migration.
 
 Command line (what download_models.py used to do):
-    python -m parakeet_dictation.models              # download default (desktop) profile + VAD
+    python -m parakeet_dictation.models              # download the default (desktop) profile
     python -m parakeet_dictation.models desktop      # download desktop profile
     python -m parakeet_dictation.models laptop       # download laptop profile
     python -m parakeet_dictation.models streaming    # download streaming profile
     python -m parakeet_dictation.models all          # download all profiles
+
+Only the recognizer models are downloaded.  The voice activity detector is
+TEN VAD, which ships inside the ten-vad pip package (see audio.py); nothing
+is fetched for it.
 """
 
 import json
@@ -93,18 +97,6 @@ def _download_file(url: str, dest: Path, on_progress_bytes=None):
         raise
 
 
-def _ensure_vad(profiles_data: dict, on_progress_bytes=None):
-    """Download the VAD model if not present."""
-    vad = profiles_data.get("vad")
-    if not vad:
-        return
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    dest = MODELS_DIR / vad["filename"]
-    if dest.exists() and dest.stat().st_size > 0:
-        return
-    _download_file(vad["url"], dest, on_progress_bytes)
-
-
 def _download_model(model_id: str, profiles_data: dict, on_progress, on_done):
     """Download a model in a background thread."""
 
@@ -113,14 +105,6 @@ def _download_model(model_id: str, profiles_data: dict, on_progress, on_done):
             profile = profiles_data["profiles"][model_id]
             model_dir = MODELS_DIR / model_id
             model_dir.mkdir(parents=True, exist_ok=True)
-
-            # Download VAD first
-            def _vad_progress(done, total):
-                if total:
-                    mb = done / 1024 / 1024
-                    total_mb = total / 1024 / 1024
-                    GLib.idle_add(on_progress, f"VAD: {mb:.0f}/{total_mb:.0f} MB", -1.0)
-            _ensure_vad(profiles_data, _vad_progress)
 
             # Download model files
             files = profile["files"]
@@ -158,14 +142,6 @@ def _download_all_models(profiles_data: dict, on_progress, on_done):
 
     def _worker():
         try:
-            # Download VAD first
-            def _vad_progress(done, total):
-                if total:
-                    mb = done / 1024 / 1024
-                    total_mb = total / 1024 / 1024
-                    GLib.idle_add(on_progress, f"VAD: {mb:.0f}/{total_mb:.0f} MB", -1.0)
-            _ensure_vad(profiles_data, _vad_progress)
-
             profiles = profiles_data["profiles"]
             for mid, profile in profiles.items():
                 model_dir = MODELS_DIR / mid
@@ -213,16 +189,6 @@ def download_file(url: str, dest: Path):
         for chunk in resp.iter_content(chunk_size=1024 * 1024):
             f.write(chunk)
             bar.update(len(chunk))
-
-
-def download_vad(config: dict):
-    vad = config["vad"]
-    dest = MODELS_DIR / vad["filename"]
-    if dest.exists() and dest.stat().st_size > 0:
-        print(f"  {vad['filename']} already exists.")
-        return
-    print(f"Downloading VAD model...")
-    download_file(vad["url"], dest)
 
 
 def download_profile(config: dict, profile_id: str):
