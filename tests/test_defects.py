@@ -502,9 +502,110 @@ def defect4_single_instance():
     holder.release()
 
 # ---------------------------------------------------------------------------
+# #5  A missing helper binary is named as itself (wl-copy, ydotool, ...),
+#     never as the typer method.
+# ---------------------------------------------------------------------------
+
+class _Completed:
+    def __init__(self, rc=0, out=b""):
+        self.returncode, self.stdout, self.stderr = rc, out, b""
+
+
+def _missing(exe, with_filename):
+    """What subprocess raises for an absent executable.  The OS normally fills
+    in `filename`; the other form is what a wrapped/other OSError looks like,
+    and the handler must name the helper either way."""
+    if with_filename:
+        return FileNotFoundError(2, "No such file or directory", exe)
+    return FileNotFoundError(2, "No such file or directory")
+
+
+def defect5_missing_helper_named():
+    print("\n[#5] a missing helper is named, not the typer method")
+    from parakeet_dictation import insert as da_insert
+    da_insert.DIAG = TEST_DIAG
+    saved = (da_insert.subprocess.run, da_insert.shutil.which, da_insert.portal_keyboard)
+    da_insert.portal_keyboard = lambda: None
+    try:
+        for with_filename in (True, False):
+            tag = "OS names the file" if with_filename else "errno only"
+            # --- wl-copy absent, typer method "clipboard" ----------------------
+            def run(args, **_kw):
+                if args[0] == "wl-copy":
+                    raise _missing("wl-copy", with_filename)
+                if args[0] == "wl-paste":
+                    return _Completed(0, b"")
+                return _Completed()
+            da_insert.subprocess.run = run
+            da_insert.shutil.which = lambda n: f"/usr/bin/{n}" if n == "ydotool" else None
+            failures = []
+            typer = da_insert.TextTyper("clipboard", on_failure=failures.append)
+            before = len(diag_lines())
+            err = io.StringIO()
+            with redirect_stderr(err):
+                typer.type_text("hello")
+            lines = diag_lines()[before:]
+            check(f"[{tag}] the log names wl-copy",
+                  any("event=helper_missing" in l and "exe=wl-copy" in l for l in lines),
+                  str(lines[-1:]))
+            check(f"[{tag}] the user-facing error names wl-copy",
+                  bool(failures) and "wl-copy" in failures[-1], str(failures))
+            check(f"[{tag}] stderr names wl-copy, not 'clipboard'",
+                  "wl-copy" in err.getvalue() and "clipboard not found" not in err.getvalue(),
+                  err.getvalue().strip()[:80])
+
+            # --- ydotool absent at exec time (which() said it was there) -------
+            def run2(args, **_kw):
+                if args[0] == "ydotool":
+                    raise _missing("ydotool", with_filename)
+                if args[0] == "wl-paste":
+                    return _Completed(0, b"")
+                return _Completed()
+            da_insert.subprocess.run = run2
+            typer = da_insert.TextTyper("clipboard", on_failure=failures.append)
+            before = len(diag_lines())
+            with redirect_stderr(io.StringIO()):
+                typer.type_text("hello")
+            lines = diag_lines()[before:]
+            check(f"[{tag}] a vanished ydotool is named in the log",
+                  any("event=helper_missing" in l and "exe=ydotool" in l for l in lines),
+                  str([l.split("event=")[1][:60] for l in lines]))
+
+            # --- the backspace path blamed the method too ----------------------
+            before = len(diag_lines())
+            err = io.StringIO()
+            with redirect_stderr(err):
+                typer._send_backspaces(2)
+            lines = diag_lines()[before:]
+            check(f"[{tag}] backspace helper: log names ydotool",
+                  any("event=helper_missing" in l and "exe=ydotool" in l for l in lines))
+            check(f"[{tag}] backspace helper: stderr names ydotool, not 'for clipboard'",
+                  "ydotool" in err.getvalue() and "for clipboard" not in err.getvalue(),
+                  err.getvalue().strip()[:80])
+
+        # --- wtype method, wtype absent: still named as itself -----------------
+        def run3(args, **_kw):
+            if args[0] == "wtype":
+                raise _missing("wtype", True)
+            return _Completed()
+        da_insert.subprocess.run = run3
+        failures = []
+        typer = da_insert.TextTyper("wtype", on_failure=failures.append)
+        before = len(diag_lines())
+        with redirect_stderr(io.StringIO()):
+            typer.type_text("hello")
+        check("wtype absent: named in log and error",
+              any("exe=wtype" in l for l in diag_lines()[before:])
+              and bool(failures) and "wtype" in failures[-1], str(failures))
+    finally:
+        (da_insert.subprocess.run, da_insert.shutil.which,
+         da_insert.portal_keyboard) = saved
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = [defect2_config_load, defect3_engine_stop,
-            defect4_single_instance]
+            defect4_single_instance, defect5_missing_helper_named]
 
 
 def main():

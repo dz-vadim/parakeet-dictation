@@ -24,6 +24,7 @@ measured on the machine this ships on:
   that silently went nowhere.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -431,6 +432,30 @@ def _run_quiet(args, timeout=5):
                           stderr=subprocess.DEVNULL, close_fds=True)
 
 
+# What to install when a helper is missing, by executable name.
+_HELPER_PACKAGE = {
+    "wl-copy": "wl-clipboard", "wl-paste": "wl-clipboard",
+    "ydotool": "ydotool (and start ydotoold)", "xdotool": "xdotool", "wtype": "wtype",
+}
+
+
+def _report_missing(exc, fallback: str, method: str, notify=None) -> str:
+    """Name the executable that is actually missing, in the log and the error.
+
+    subprocess puts argv[0] in `exc.filename`; when that is absent (a wrapped
+    or re-raised OSError) `fallback` is the helper that was being run.  The
+    typer method ("clipboard") is never the answer — it is not a program
+    anyone can install.
+    """
+    exe = os.path.basename(str(getattr(exc, "filename", None) or fallback))
+    DIAG.log("helper_missing", exe=exe, method=method)
+    hint = _HELPER_PACKAGE.get(exe, exe)
+    print(f"ERROR: {exe} not found — install {hint}.", file=sys.stderr)
+    if notify:
+        notify(f"{exe} not found — install {hint}")
+    return exe
+
+
 class TextTyper:
     def __init__(self, method: str = "clipboard", keep_on_clipboard: bool = False,
                  paste_chord: str = CHORD_CTRL_V,
@@ -488,7 +513,10 @@ class TextTyper:
             else:
                 self._clipboard_paste(text, target)
         except FileNotFoundError as e:
-            print(f"ERROR: {e.filename or self._method} not found.", file=sys.stderr)
+            # Only wtype and the wl-copy staging can raise here: the chord
+            # transports report their own absence (see _send_chord).
+            _report_missing(e, "wtype" if self._method == "wtype" else "wl-copy",
+                            self._method, self._on_failure)
         except subprocess.TimeoutExpired:
             pass
 
@@ -538,6 +566,9 @@ class TextTyper:
             # instead of restoring it.
             args = ["wl-paste", "--no-newline"] + (["--primary"] if primary else [])
             res = subprocess.run(args, capture_output=True, timeout=2)
+        except FileNotFoundError as e:
+            _report_missing(e, "wl-paste", "clipboard")
+            return None
         except (OSError, subprocess.TimeoutExpired):
             return None
         if res.returncode != 0:
@@ -600,6 +631,9 @@ class TextTyper:
             try:
                 res = subprocess.run(["ydotool", "key", *_CHORD_KEYCODES[chord]],
                                      timeout=5, capture_output=True)
+            except FileNotFoundError as e:      # gone between which() and exec
+                _report_missing(e, "ydotool", self._method)
+                return False, "ydotool"
             except (OSError, subprocess.TimeoutExpired):
                 return False, "ydotool"
             return res.returncode == 0, "ydotool"
@@ -608,6 +642,9 @@ class TextTyper:
             try:
                 res = subprocess.run(["xdotool", "key", chord], timeout=5,
                                      capture_output=True)
+            except FileNotFoundError as e:
+                _report_missing(e, "xdotool", self._method)
+                return False, "xdotool"
             except (OSError, subprocess.TimeoutExpired):
                 return False, "xdotool"
             return res.returncode == 0, "xdotool"
@@ -632,20 +669,23 @@ class TextTyper:
         """Erase *count* characters via repeated BackSpace key presses."""
         if count <= 0:
             return
+        if self._method == "wtype":
+            helper = "wtype"
+        elif shutil.which("ydotool"):
+            helper = "ydotool"
+        else:
+            helper = "xdotool"      # last resort — only reaches XWayland windows
         try:
-            if self._method == "wtype":
-                for _ in range(count):
+            for _ in range(count):
+                if helper == "wtype":
                     subprocess.run(["wtype", "-k", "BackSpace"], timeout=5)
-            elif shutil.which("ydotool"):
-                # ydotool key takes Linux input keycodes; BackSpace = 14
-                for _ in range(count):
+                elif helper == "ydotool":
+                    # ydotool key takes Linux input keycodes; BackSpace = 14
                     subprocess.run(["ydotool", "key", "14:1", "14:0"], timeout=5)
-            else:
-                # last resort — xdotool only reaches XWayland windows
-                for _ in range(count):
+                else:
                     subprocess.run(["xdotool", "key", "BackSpace"], timeout=5)
-        except FileNotFoundError:
-            print(f"ERROR: backspace helper not found for {self._method}.", file=sys.stderr)
+        except FileNotFoundError as e:
+            _report_missing(e, helper, self._method, self._on_failure)
         except subprocess.TimeoutExpired:
             pass
 
