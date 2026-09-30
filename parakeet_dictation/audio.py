@@ -225,9 +225,25 @@ class TenVadDetector:
         `force` is the end-of-take flush: whatever is still buffered is what
         the user just said, so the only floor allowed to drop it is the
         recognizer's own MIN_SEGMENT_SAMPLES one, applied at submit time.
+
+        The floor counts SPEECH hops, not the buffer: on every silence-close
+        the buffer already holds min_silence_duration of trailing silence, so
+        measured against it the floor was dead and a single VAD blip became
+        a ~0.8 s near-silent segment that, normalised by +20 dB, decoded to
+        hallucinated words.
         """
-        if force or len(self._buffer) >= self._min_speech_samples:
+        if force or self._speech_samples >= self._min_speech_samples:
             self._segments.append(_SpeechSegment(list(self._buffer), self._lead))
+        elif self._lead is not None:
+            # A blip too short to be speech: what was buffered is part of the
+            # pause it interrupted, so it goes back into the gap and the
+            # contiguous span across that pause stays whole for the coalescer.
+            self._gap = [self._lead, np.asarray(self._buffer, dtype=np.float32)]
+            self._gap_samples = len(self._lead) + len(self._buffer)
+            if self._gap_samples > self._max_gap_samples:
+                self._gap = None
+        else:
+            self._gap = None      # the pause was already past the carry cap
         self._lead = None
         self._buffer.clear()
         self._in_speech = False
