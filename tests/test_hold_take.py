@@ -527,18 +527,23 @@ def part2_insertion():
     before = len(diag_lines())
     typer = da_insert.TextTyper("clipboard", keep_on_clipboard=False)
     typer.type_text("hello", target=snap("kitty"))
+    typer.wait_idle()
     check("the clipboard held the text when the chord went out",
           PASTES and PASTES[-1][1] == "hello ", str(PASTES[-1:]))
     check("and so did the primary selection (what Shift+Insert reads in kitty)",
           PRIMARY["text"] == "hello ", repr(PRIMARY["text"]))
     check("a kitty target got Ctrl+Shift+V", CHORDS[-1:] == ["ctrl+shift+v"], str(CHORDS))
     typer.type_text("hi", target=snap("emacs"))
+    typer.wait_idle()
     check("an emacs target got Shift+Insert", CHORDS[-1:] == ["shift+insert"], str(CHORDS))
     typer.type_text("hi", target=snap("org.kde.kwrite"))
+    typer.wait_idle()
     check("a kwrite target got Ctrl+V", CHORDS[-1:] == ["ctrl+v"], str(CHORDS))
     typer.type_text("hi", target=None)
+    typer.wait_idle()
     check("no target at all got the default Ctrl+V", CHORDS[-1:] == ["ctrl+v"], str(CHORDS))
     typer.type_text("hi", target="Alacritty")
+    typer.wait_idle()
     check("a bare class string works as a target too", CHORDS[-1:] == ["ctrl+shift+v"])
     lines = diag_lines()[before:]
     check("paste logged with chord, transport, target and detect",
@@ -562,6 +567,7 @@ def part2_insertion():
     YDOTOOL_FAIL["n"] = 1                    # the first chord press errors out
     before = len(diag_lines())
     typer.type_text("retry me", target=snap("chromium"))
+    typer.wait_idle()
     lines = diag_lines()[before:]
     check("after a transport failure the retry is Shift+Insert",
           CHORDS == ["shift+insert"], str(CHORDS))
@@ -578,6 +584,7 @@ def part2_insertion():
     YDOTOOL_FAIL["n"] = 2                    # the chord AND the retry error out
     before = len(diag_lines())
     typer.type_text("stranded", target=snap("chromium"))
+    typer.wait_idle()
     lines = diag_lines()[before:]
     check("paste_failed logged when the retry fails too",
           any("event=paste_failed" in l and "target=chromium" in l for l in lines))
@@ -593,6 +600,7 @@ def part2_insertion():
     PASTES.clear(); CHORDS.clear()
     CLIP["text"] = USER_CLIPBOARD
     typer.type_text("next take", target=snap("chromium"))
+    typer.wait_idle()
     check("the next insertion saves the user's clipboard afresh",
           PASTES and PASTES[-1][1] == "next take ")
     time.sleep(0.8)
@@ -1135,6 +1143,7 @@ def part3_clipboard():
     typer.type_text("first phrase")
     typer.type_text("second phrase")
     typer.type_text("third phrase")
+    typer.wait_idle()      # the pastes are queued; let them go out
     delivered = [text.strip() for _t, text in PASTES]
     check("every insertion pasted its own text, none pasted a stale value",
           delivered == ["first phrase", "second phrase", "third phrase"],

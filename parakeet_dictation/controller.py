@@ -270,6 +270,9 @@ class DictationController:
         self._cancel_tail()
         self._engine.stop()
         self._typer.reset_partial()
+        # A paste still in flight on the typer's worker gets to go out: the
+        # process is about to exit and would take it along.
+        self._typer.wait_idle(3.0)
         if self._gesture != GESTURE_IDLE:
             self._end_take("cancel", "shutdown")
         self._overlay_state("hidden")
@@ -409,7 +412,8 @@ class DictationController:
     # --- take termination -------------------------------------------------
 
     def _finish_take(self, take: int, reason: str):
-        """Capture and the decoder have both drained — the take is over."""
+        """Capture and the decoder have both drained: hand the take's text to
+        the typer, and finish once it has landed (see _complete_take)."""
         if take != self._take_seq or take <= self._take_closed:
             # The take already ended by another route (cancel, error) — its
             # late finisher must not re-open or re-report it.
@@ -417,48 +421,68 @@ class DictationController:
             return GLib.SOURCE_REMOVE
         self._typer.reset_partial()
         emitted = self._take_texts
-        outcome = "success" if emitted else "no_speech"
-        pill = "success" if emitted else "hidden"
-        message = ""
+
+        def landed():
+            # On the typer's worker thread: hop back to the main loop.
+            GLib.idle_add(self._complete_take, take, reason, emitted)
+
         try:
-            self._flush_take_text()
+            self._flush_take_text(landed)
         except Exception as e:
-            # Whatever escaped the typer: say so on the pill and in the log.
-            # The take still ends below — left at STOPPING, every later key
+            # Whatever escaped the typer's own guards (a broken typer object,
+            # say): the take still ends — left at STOPPING, every later key
             # press was ignored until the app was restarted.
-            outcome, pill = "insert_error", "error"
-            message = "Insertion failed — text was not pasted"
             DIAG.log("take_insert_error", err=type(e).__name__, take=take)
             print(f"ERROR: insertion failed: {type(e).__name__}: {e}", file=sys.stderr)
-        finally:
-            # Pill before _end_take: a start queued behind this take opens
-            # from there and puts its own "preparing" on the pill.
-            self._overlay_state(pill, message)
-            if self._status_callback:
-                self._status_callback("")
-            self._end_take(outcome, reason)
+            self._overlay_state("error", "Insertion failed — text was not pasted")
+            self._end_take("insert_error", reason)
         return GLib.SOURCE_REMOVE
 
-    def _flush_take_text(self):
-        """Insert everything the take held back, as one paste.
+    def _complete_take(self, take: int, reason: str, emitted: int):
+        """The insertion has gone out (or there was none): the take is over.
+
+        Only now does the pill flip to success and the gesture reset.  The
+        paste chord goes out through the same virtual keyboard the
+        push-to-talk key is held on, so a take queued behind this one must
+        not open before the chord has left.
+        """
+        if take != self._take_seq or take <= self._take_closed:
+            DIAG.log("finish_take_stale", take=take, current=self._take_seq)
+            return GLib.SOURCE_REMOVE
+        # Pill before _end_take: a start queued behind this take opens from
+        # there and puts its own "preparing" on the pill.
+        self._overlay_state("success" if emitted else "hidden")
+        if self._status_callback:
+            self._status_callback("")
+        self._end_take("success" if emitted else "no_speech", reason)
+        return GLib.SOURCE_REMOVE
+
+    def _flush_take_text(self, on_done):
+        """Insert everything the take held back, as one paste, then `on_done`.
 
         End-of-take mode only.  This is that mode's single insertion point:
         nothing reaches the document while the key is down, so a pause to think
         cannot drop half a sentence into the middle of the previous one.
-        """
-        if not self._take_chunks:
-            return
-        segments = len(self._take_chunks)
-        text = _WS_RE.sub(" ", " ".join(self._take_chunks)).strip()
-        self._take_chunks = []
-        if text:
-            self._insert(text, segments)
 
-    def _insert(self, text: str, segments: int):
+        `on_done` runs on the typer's worker once that paste has gone out —
+        or, with nothing held back (per-segment mode, no speech), once every
+        insertion queued before it has, so the take never ends ahead of its
+        own text.
+        """
+        chunks, self._take_chunks = self._take_chunks, []
+        text = _WS_RE.sub(" ", " ".join(chunks)).strip()
+        if text:
+            self._insert(text, len(chunks), on_done=on_done)
+        else:
+            self._typer.after_pending(on_done)
+
+    def _insert(self, text: str, segments: int, on_done=None):
         """The one place decoded text reaches the document.
 
         `waited_ms` is how long this insertion waited after the take's stop was
         initiated — 0 for a segment inserted while the key was still down.
+        The typer queues the paste and returns; `on_done` (if any) fires on
+        its worker once the paste has gone out.
         """
         self._take_inserts += 1
         self._last_insert_t = time.monotonic()
@@ -474,7 +498,7 @@ class DictationController:
                  index=self._take_inserts, chars=len(text), segments=segments,
                  waited_ms=waited_ms, take=self._take_seq,
                  target=(getattr(target, "resource_class", "") or "unknown"))
-        self._typer.type_text(text, target=target)
+        self._typer.type_text(text, target=target, on_done=on_done)
         if self._status_callback:
             self._status_callback("")
 

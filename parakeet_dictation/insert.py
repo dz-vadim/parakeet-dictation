@@ -24,6 +24,7 @@ measured on the machine this ships on:
   that silently went nowhere.
 """
 
+import collections
 import os
 import re
 import shutil
@@ -505,10 +506,67 @@ class TextTyper:
         self._clip_saved = None        # (clipboard, primary) of the user's
         self._clip_restore_pending = False
         self._clip_gen = 0
+        # The insertion queue.  Every public entry point hands its work to
+        # ONE worker thread (started on demand, gone when the queue is empty)
+        # and returns at once: a paste is two wl-paste reads with 2 s
+        # timeouts, two wl-copy spawns, a 60 ms settle and a chord, and all
+        # of that used to run on the GTK main thread at key release.  A single
+        # consumer over a FIFO keeps the pastes in call order, which the
+        # clipboard save/restore above depends on; `_clip_lock` still guards
+        # the clipboard state against the restore timers.
+        self._queue = collections.deque()
+        self._queue_lock = threading.Lock()
+        self._worker = None
 
     @property
     def chord_config(self):
         return self._chord_config
+
+    # -- the insertion queue ------------------------------------------------
+
+    def _submit(self, job, on_done=None):
+        with self._queue_lock:
+            self._queue.append((job, on_done))
+            if self._worker is None:
+                self._worker = threading.Thread(target=self._drain, daemon=True,
+                                                name="text-typer")
+                self._worker.start()
+
+    def _drain(self):
+        while True:
+            with self._queue_lock:
+                if not self._queue:
+                    self._worker = None
+                    return
+                job, on_done = self._queue.popleft()
+            try:
+                if job is not None:
+                    job()
+            except Exception as e:
+                # _type_raw reports its own helper errors; this is the net
+                # under everything else, because a job that took the worker
+                # down would take the take's completion callback with it.
+                DIAG.log("insert_error", err=type(e).__name__)
+                print(f"ERROR: insertion failed: {type(e).__name__}: {e}", file=sys.stderr)
+                if self._on_failure:
+                    self._on_failure(f"Insertion failed: {type(e).__name__}")
+            finally:
+                if on_done is not None:
+                    try:
+                        on_done()
+                    except Exception as e:
+                        DIAG.log("insert_done_error", err=type(e).__name__)
+
+    def after_pending(self, callback):
+        """Call `callback` (on the worker thread) once every insertion queued
+        before now has gone out — the controller's "text has landed" signal."""
+        self._submit(None, callback)
+
+    def wait_idle(self, timeout: float = 5.0) -> bool:
+        """Block until the queue has drained.  Shutdown and tests only."""
+        done = threading.Event()
+        self.after_pending(done.set)
+        return done.wait(timeout)
 
     # -- low-level helpers --------------------------------------------------
 
@@ -697,24 +755,23 @@ class TextTyper:
         return False
 
     def _send_backspaces(self, count: int):
-        """Erase *count* characters via repeated BackSpace key presses."""
+        """Erase *count* characters with ONE helper invocation.
+
+        Streaming partials are revised several times a second; one process
+        per character, as this did, was hundreds of spawns per sentence.
+        """
         if count <= 0:
             return
         if self._method == "wtype":
-            helper = "wtype"
+            helper, args = "wtype", ["wtype", *(["-k", "BackSpace"] * count)]
         elif shutil.which("ydotool"):
-            helper = "ydotool"
+            # ydotool key takes Linux input keycodes; BackSpace = 14
+            helper, args = "ydotool", ["ydotool", "key", *(["14:1", "14:0"] * count)]
         else:
-            helper = "xdotool"      # last resort — only reaches XWayland windows
+            # Last resort — only reaches XWayland windows.
+            helper, args = "xdotool", ["xdotool", "key", "--repeat", str(count), "BackSpace"]
         try:
-            for _ in range(count):
-                if helper == "wtype":
-                    subprocess.run(["wtype", "-k", "BackSpace"], timeout=5)
-                elif helper == "ydotool":
-                    # ydotool key takes Linux input keycodes; BackSpace = 14
-                    subprocess.run(["ydotool", "key", "14:1", "14:0"], timeout=5)
-                else:
-                    subprocess.run(["xdotool", "key", "BackSpace"], timeout=5)
+            subprocess.run(args, timeout=5)
         except FileNotFoundError as e:
             _report_missing(e, helper, self._method, self._on_failure)
         except subprocess.TimeoutExpired:
@@ -727,36 +784,52 @@ class TextTyper:
 
     # -- public API ---------------------------------------------------------
 
-    def type_text(self, text: str, target=None):
-        """Type final (committed) text — adds trailing space.
+    def type_text(self, text: str, target=None, on_done=None):
+        """Queue final (committed) text — adds trailing space.  Returns at once.
 
         `target` is the focus snapshot the caller took when the take ended
         (whatever was focused at release, not 300 ms later); None means the
-        class is unknown and the configured default chord applies.
+        class is unknown and the configured default chord applies.  `on_done`
+        runs on the worker thread once this paste has gone out.
         """
         text = self._sanitize(text)
         if not text:
+            if on_done is not None:
+                self.after_pending(on_done)
             return
-        self._type_raw(text + " ", target)
+        self._submit(lambda: self._type_raw(text + " ", target), on_done)
 
     def type_partial(self, text: str, target=None):
-        """Type a streaming partial, erasing the previous partial first."""
+        """Queue a streaming partial, erasing the previous partial first."""
         text = self._sanitize(text)
         if not text:
             return
-        # Erase whatever we typed last time
-        self._send_backspaces(self._partial_len)
-        self._type_raw(text, target)
-        self._partial_len = len(text)
+
+        def job():
+            # _partial_len is only ever touched on the worker, so the jobs
+            # see it in the order they were queued.
+            self._send_backspaces(self._partial_len)
+            self._type_raw(text, target)
+            self._partial_len = len(text)
+
+        self._submit(job)
 
     def commit_partial(self, text: str, target=None):
         """Commit (finalize) a partial: erase old partial, type final + space."""
         text = self._sanitize(text)
-        self._send_backspaces(self._partial_len)
-        self._partial_len = 0
-        if text:
-            self._type_raw(text + " ", target)
+
+        def job():
+            self._send_backspaces(self._partial_len)
+            self._partial_len = 0
+            if text:
+                self._type_raw(text + " ", target)
+
+        self._submit(job)
 
     def reset_partial(self):
-        """Discard partial tracking without erasing anything on screen."""
-        self._partial_len = 0
+        """Discard partial tracking without erasing anything on screen.
+        Queued like the rest, so it lands after the commit it follows."""
+        def job():
+            self._partial_len = 0
+
+        self._submit(job)

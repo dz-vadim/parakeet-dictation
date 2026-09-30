@@ -987,6 +987,88 @@ def review13_focus_snapshot_is_cache_only():
 
 
 # ---------------------------------------------------------------------------
+# #14 Insertion runs off the calling (GTK main) thread, in order, and a run
+#     of backspaces is one helper process.
+# ---------------------------------------------------------------------------
+
+def review14_insertion_off_thread_and_batched_backspaces():
+    print("\n[#14] insertion is off the main thread; backspaces are batched")
+    saved = (da_insert.subprocess.run, da_insert.shutil.which, da_insert.portal_keyboard)
+    da_insert.portal_keyboard = lambda: None
+    da_insert.shutil.which = lambda n: f"/usr/bin/{n}" if n == "ydotool" else None
+    calls, threads = [], set()
+
+    def run(args, **_kw):
+        args = list(args)
+        calls.append(args)
+        if args[0] == "ydotool" or (args[0] == "wl-copy" and "--" in args):
+            threads.add(threading.get_ident())
+        if args[0] == "ydotool":
+            time.sleep(0.05)                # a slow chord
+        if args[0] == "wl-paste":
+            return _Completed(0, b"")
+        return _Completed()
+
+    da_insert.subprocess.run = run
+    try:
+        typer = da_insert.TextTyper("clipboard")
+        me = threading.get_ident()
+        t0 = time.monotonic()
+        typer.type_text("one")
+        typer.type_text("two")
+        typer.type_text("three")
+        dt = time.monotonic() - t0
+        check("type_text returns without waiting for wl-copy, the settle or the chord",
+              dt < 0.03, f"{dt * 1000:.0f} ms for three insertions")
+        wait = getattr(typer, "wait_idle", None)
+        check("the typer can be waited on (wait_idle)", callable(wait))
+        if callable(wait):
+            check("and wait_idle returns once the queue has drained", wait(5.0) is True)
+        staged = [a[-1] for a in calls
+                  if a[0] == "wl-copy" and "--" in a and "--primary" not in a]
+        chords = [a for a in calls if a[0] == "ydotool"]
+        check("the three insertions were staged and pasted in call order",
+              staged == ["one ", "two ", "three "] and len(chords) == 3, str(staged))
+        check("every helper ran off the calling thread", threads and me not in threads,
+              f"{len(threads)} thread(s), caller among them: {me in threads}")
+        check("and on one worker (the clipboard is a shared resource)", len(threads) == 1,
+              f"{len(threads)} worker threads")
+        time.sleep(da_insert.RESTORE_AFTER_S + 0.4)      # outlive the restores
+
+        calls.clear()
+        typer._send_backspaces(7)
+        bs = [a for a in calls if a[0] == "ydotool"]
+        check("seven backspaces are ONE ydotool invocation",
+              len(bs) == 1 and bs[0][1] == "key" and bs[0][2:] == ["14:1", "14:0"] * 7,
+              f"{len(bs)} invocation(s)")
+        calls.clear()
+        typer._send_backspaces(0)
+        check("zero backspaces spawn nothing", calls == [])
+
+        # Streaming partials: erase, then type, in order — through the same queue.
+        calls.clear()
+        typer.type_partial("hello")
+        typer.type_partial("hello world")
+        typer.commit_partial("hello world!")
+        if callable(wait):
+            wait(5.0)
+        seq = []
+        for a in calls:
+            if a[0] == "wl-copy" and "--" in a and "--primary" not in a:
+                seq.append(("stage", a[-1]))
+            elif a[0] == "ydotool":
+                seq.append(("backspace", len(a[2:]) // 2) if a[2] == "14:1" else ("chord",))
+        check("partials: type, erase 5, type, erase 11, commit — each erase one process",
+              seq == [("stage", "hello"), ("chord",), ("backspace", 5),
+                      ("stage", "hello world"), ("chord",), ("backspace", 11),
+                      ("stage", "hello world! "), ("chord",)], str(seq))
+        time.sleep(da_insert.RESTORE_AFTER_S + 0.4)
+    finally:
+        (da_insert.subprocess.run, da_insert.shutil.which,
+         da_insert.portal_keyboard) = saved
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
             2: review2_take_ends_even_if_the_typer_raises,
@@ -1000,7 +1082,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             10: review10_coalescer_disabled_counts_closed_blocks,
             11: review11_test_defects_runs_main_on_a_scratch_config,
             12: review12_tests_locate_the_checkout_from_file,
-            13: review13_focus_snapshot_is_cache_only}
+            13: review13_focus_snapshot_is_cache_only,
+            14: review14_insertion_off_thread_and_batched_backspaces}
 
 
 def main(argv):

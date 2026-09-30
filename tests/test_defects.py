@@ -577,6 +577,7 @@ def defect5_missing_helper_named():
             err = io.StringIO()
             with redirect_stderr(err):
                 typer.type_text("hello")
+                typer.wait_idle()
             lines = diag_lines()[before:]
             check(f"[{tag}] the log names wl-copy",
                   any("event=helper_missing" in l and "exe=wl-copy" in l for l in lines),
@@ -599,6 +600,7 @@ def defect5_missing_helper_named():
             before = len(diag_lines())
             with redirect_stderr(io.StringIO()):
                 typer.type_text("hello")
+                typer.wait_idle()
             lines = diag_lines()[before:]
             check(f"[{tag}] a vanished ydotool is named in the log",
                   any("event=helper_missing" in l and "exe=ydotool" in l for l in lines),
@@ -627,6 +629,7 @@ def defect5_missing_helper_named():
         before = len(diag_lines())
         with redirect_stderr(io.StringIO()):
             typer.type_text("hello")
+            typer.wait_idle()
         check("wtype absent: named in log and error",
               any("exe=wtype" in l for l in diag_lines()[before:])
               and bool(failures) and "wtype" in failures[-1], str(failures))
@@ -710,6 +713,7 @@ def defect6_clipboard_verbatim():
             fake.pastes.clear()
             typer = da_insert.TextTyper("clipboard", keep_on_clipboard=False)
             typer.type_text("dictated")
+            typer.wait_idle()
             check(f"{label}: the paste carried the dictated text",
                   fake.pastes == [b"dictated "], str(fake.pastes)[:60])
             time.sleep(da_insert.RESTORE_AFTER_S + 0.4)
@@ -721,6 +725,7 @@ def defect6_clipboard_verbatim():
         fake.clip, fake.primary = None, None
         typer = da_insert.TextTyper("clipboard", keep_on_clipboard=False)
         typer.type_text("dictated")
+        typer.wait_idle()
         time.sleep(da_insert.RESTORE_AFTER_S + 0.4)
         check("an empty clipboard is left empty, not holding the dictated text",
               fake.clip is None and fake.primary is None,
