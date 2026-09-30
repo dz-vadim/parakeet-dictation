@@ -6,7 +6,7 @@ need a keypress you cannot inject (a release with nothing running, a duplicate
 release mid-stop) and the fast re-trigger that the reset rule exists for.
 """
 import pathlib, sys, threading
-sys.path.insert(0, "/home/dz/Projects/parakeet-dictation")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))   # the checkout
 from parakeet_dictation import (config as da_config, controller as da_controller,
                                 diagnostics as da_diagnostics, engine as da_engine)
 from gi.repository import GLib

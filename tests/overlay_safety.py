@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Overlay honesty checks: refusal gate, watchdog, stale meter, preview panel."""
-import sys, time
-sys.path.insert(0, "/home/dz/Projects/parakeet-dictation")
+import pathlib, sys, time
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))   # the checkout
 from parakeet_dictation import config as da_config, diagnostics as da_diagnostics
 from parakeet_dictation.ui import overlay as da_overlay
 from gi.repository import GLib

@@ -910,6 +910,19 @@ def review11_test_defects_runs_main_on_a_scratch_config():
 
 
 # ---------------------------------------------------------------------------
+# #12 ptt_state.py and overlay_safety.py locate the checkout from __file__.
+# ---------------------------------------------------------------------------
+
+def review12_tests_locate_the_checkout_from_file():
+    print("\n[#12] the GLib test scripts carry no hard-coded checkout path")
+    for name in ("ptt_state.py", "overlay_safety.py"):
+        src = (HERE / name).read_text()
+        check(f"{name} has no absolute /home/... path", "/home/" not in src)
+        after = src.split("sys.path.insert", 1)[1][:160] if "sys.path.insert" in src else ""
+        check(f"{name} derives sys.path from __file__", "__file__" in after, after[:80])
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
             2: review2_take_ends_even_if_the_typer_raises,
@@ -921,7 +934,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             8: review8_cli_download_is_atomic,
             9: review9_preview_keeps_going_beyond_the_window,
             10: review10_coalescer_disabled_counts_closed_blocks,
-            11: review11_test_defects_runs_main_on_a_scratch_config}
+            11: review11_test_defects_runs_main_on_a_scratch_config,
+            12: review12_tests_locate_the_checkout_from_file}
 
 
 def main(argv):
