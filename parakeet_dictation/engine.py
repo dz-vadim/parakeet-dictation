@@ -490,6 +490,7 @@ class ASREngine:
                 GLib.idle_add(self._on_partial, "")
 
                 last_overflow_log = 0.0
+                was_speech = False
                 while not stop_event.is_set():
                     self._pause_event.wait(timeout=0.1)
                     if stop_event.is_set():
@@ -513,8 +514,11 @@ class ASREngine:
                         speech = vad.is_speech_detected()
                         stats["captured"] += len(samples)
                     self._publish_level(audio, speech)
-                    if speech:
+                    if speech and not was_speech:
+                        # On the edge only: the same caption ten times a
+                        # second is ten idle callbacks the loop has to run.
                         GLib.idle_add(self._on_partial, "Listening...")
+                    was_speech = speech
 
                     drain("silence")
 
@@ -786,6 +790,7 @@ class ASREngine:
             GLib.idle_add(self._on_partial, "")
 
             last_overflow_log = 0.0
+            last_partial = ""
             while not stop_event.is_set():
                 self._pause_event.wait(timeout=0.1)
                 if stop_event.is_set():
@@ -812,10 +817,13 @@ class ASREngine:
                     at_endpoint = recognizer.is_endpoint(stream)
 
                 speaking = bool(partial)
-                if partial:
+                if partial and partial != last_partial:
+                    # Only a changed hypothesis is worth a callback: unchanged,
+                    # it would re-erase and re-type the same words every 100 ms.
                     GLib.idle_add(self._on_partial, partial)
                     if partial_overwrite:
                         GLib.idle_add(self._on_partial_type, partial)
+                last_partial = partial
 
                 if at_endpoint:
                     if partial:
@@ -825,6 +833,7 @@ class ASREngine:
                             GLib.idle_add(self._on_text, partial)
                     with INFERENCE_LOCK:
                         recognizer.reset(stream)
+                    last_partial = ""
 
         # End of session.  Everything after the last endpoint is still in the
         # stream and used to be lost with it: a release mid-sentence is the
