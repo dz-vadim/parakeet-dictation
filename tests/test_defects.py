@@ -758,10 +758,45 @@ def defect7_overlay_fallback_honest():
 
 
 # ---------------------------------------------------------------------------
+# #8  The missing-model message points at a downloader that exists.
+# ---------------------------------------------------------------------------
+
+def defect8_model_hint():
+    print("\n[#8] missing-model message names the real downloader")
+    from parakeet_dictation import controller as da_controller
+    profile = {"streaming": False, "files": {
+        "encoder": {"filename": "no-such-encoder.onnx"},
+        "tokens": {"filename": "no-such-tokens.txt"}}}
+    engine = da_engine.ASREngine(da_config.AppConfig(model_profile="desktop"), profile,
+                                 on_text=None, on_partial=None, on_error=None)
+    try:
+        engine._ensure_models()
+        msg = ""
+    except FileNotFoundError as e:
+        msg = str(e)
+    check("missing files are reported",
+          "Missing model files" in msg and "no-such-encoder.onnx" in msg, msg[:80])
+    check("the hint names the module that exists",
+          "python -m parakeet_dictation.models desktop" in msg, msg.splitlines()[-1:])
+    check("the deleted script is not mentioned", "download_models.py" not in msg)
+    check("the pill still shows the Settings › Models hint",
+          da_controller.overlay_error_message(msg)
+          == "Model files missing — open Settings › Models",
+          da_controller.overlay_error_message(msg))
+    proc = subprocess.run([sys.executable, "-m", "parakeet_dictation.models",
+                           "no-such-profile"], cwd=HERE.parent, capture_output=True,
+                          text=True, timeout=60)
+    check("`python -m parakeet_dictation.models <profile>` is runnable",
+          proc.returncode == 1 and "Unknown profile" in proc.stdout,
+          (proc.stdout + proc.stderr).strip()[-120:])
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = [defect2_config_load, defect3_engine_stop,
             defect4_single_instance, defect5_missing_helper_named,
-            defect6_clipboard_verbatim, defect7_overlay_fallback_honest]
+            defect6_clipboard_verbatim, defect7_overlay_fallback_honest,
+            defect8_model_hint]
 
 
 def main():

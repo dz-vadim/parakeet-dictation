@@ -165,7 +165,7 @@ class ASREngine:
         if missing:
             raise FileNotFoundError(
                 f"Missing model files: {', '.join(missing)}\n"
-                f"Run: python download_models.py {self._config.model_profile}"
+                f"Run: python -m parakeet_dictation.models {self._config.model_profile}"
             )
 
     def _build_offline_recognizer(self):
