@@ -20,6 +20,30 @@ OVERLAY_WATCHDOG_MS = 2000
 OVERLAY_LEVEL_STALE_S = 2.0
 
 
+def _fallback_window(win) -> bool:
+    """A plain toplevel in place of a layer-shell surface.  Returns `degraded`.
+
+    Asks for everything GTK offers: no decorations, the NOTIFICATION type
+    hint, keep-above, fixed size.  On an X11 display the window manager
+    honours those and Gtk.Window.move() places the window.  On a Wayland
+    display Gtk.Window.move() is a documented no-op for a toplevel and the
+    hints are not delivered, so the compositor decides where the window goes
+    and whether it gets a titlebar — and the client cannot observe either.
+    That case is reported as degraded rather than pretended away: the overlay
+    keeps working, it just is not where the code asked for it.
+    """
+    win.set_decorated(False)
+    win.set_resizable(False)
+    win.set_keep_above(True)
+    win.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
+    return _display_backend(win) != "GdkX11Display"
+
+
+def _display_backend(win) -> str:
+    display = win.get_display()
+    return display.__gtype__.name if display is not None else "none"
+
+
 # ---------------------------------------------------------------------------
 # Pill overlay — a capsule that says what dictation is doing, right now
 #
@@ -88,6 +112,7 @@ class TranscriptPreview:
         self._measure = None
         self._shell = None
         self.layered = False
+        self.degraded = False         # fallback window the compositor places itself
         self._win = None
 
     # --- text model (works with no window, so it is testable headless) -----
@@ -255,9 +280,9 @@ class TranscriptPreview:
             self.layered = True
             DIAG.log("preview_backend", backend="layer_shell")
         except Exception as e:
-            win.set_keep_above(True)
-            win.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
+            self.degraded = _fallback_window(win)
             DIAG.log("preview_backend", backend="fallback_window",
+                     degraded=self.degraded, display=_display_backend(win),
                      err=type(e).__name__)
         win.connect("draw", self._on_draw)
         win.connect("realize", lambda _w: self._set_click_through())
@@ -279,8 +304,8 @@ class TranscriptPreview:
         shell.set_margin(win, shell.Edge.BOTTOM, self._clearance)
 
     def _place_fallback(self, width, height):
-        if self.layered or self._win is None:
-            return
+        if self.layered or self.degraded or self._win is None:
+            return          # degraded: move() would be a no-op, not a placement
         display = Gdk.Display.get_default()
         monitor = display.get_primary_monitor() or display.get_monitor(0)
         if monitor is None:
@@ -441,6 +466,7 @@ class PillOverlay:
         self._debug = False
         self._shell = None
         self.layered = False
+        self.degraded = False         # fallback window the compositor places itself
         self._win = None
         # A sibling surface, not a taller pill: the pill's own geometry is
         # untouched by the preview existing, appearing or growing.
@@ -476,11 +502,13 @@ class PillOverlay:
             DIAG.log("overlay_backend", backend="layer_shell",
                      version=GtkLayerShell.get_protocol_version())
         except Exception as e:
-            # Undecorated keep-above window instead; it will not sit over
-            # fullscreen clients and the compositor may still focus it.
-            win.set_keep_above(True)
-            win.set_type_hint(Gdk.WindowTypeHint.NOTIFICATION)
+            # A plain keep-above window instead; it will not sit over
+            # fullscreen clients and the compositor may still focus it.  See
+            # _fallback_window for what a Wayland compositor does and does
+            # not let it ask for.
+            self.degraded = _fallback_window(win)
             DIAG.log("overlay_backend", backend="fallback_window",
+                     degraded=self.degraded, display=_display_backend(win),
                      err=type(e).__name__)
 
         win.connect("draw", self._on_draw)
@@ -501,8 +529,8 @@ class PillOverlay:
         shell.set_margin(win, shell.Edge.BOTTOM, self.MARGIN)
 
     def _place_fallback(self, width, height):
-        if self.layered:
-            return
+        if self.layered or self.degraded:
+            return          # degraded: move() would be a no-op, not a placement
         display = Gdk.Display.get_default()
         # A multi-head KDE session often marks no monitor primary at all, so
         # fall back to the first one rather than leaving the pill unplaced.

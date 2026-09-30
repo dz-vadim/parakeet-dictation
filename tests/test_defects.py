@@ -698,10 +698,70 @@ def defect6_clipboard_verbatim():
 
 
 # ---------------------------------------------------------------------------
+# #7  The non-layer-shell overlay fallback: undecorated as far as GTK can ask,
+#     and honest about the fact that a Wayland toplevel cannot be positioned.
+# ---------------------------------------------------------------------------
+
+def defect7_overlay_fallback_honest():
+    print("\n[#7] overlay fallback window: undecorated, and honest about placement")
+    from parakeet_dictation.ui import overlay as da_overlay   # pins Gtk/Gdk 3.0
+    import gi
+    gi.require_version("GtkLayerShell", "0.1")
+    from gi.repository import Gdk, GtkLayerShell
+    da_overlay.DIAG = TEST_DIAG
+    backend = Gdk.Display.get_default().__gtype__.name
+    wayland = backend != "GdkX11Display"
+    orig = GtkLayerShell.is_supported
+    GtkLayerShell.is_supported = lambda: False        # force the fallback
+    try:
+        before = len(diag_lines())
+        ov = da_overlay.PillOverlay(da_config.AppConfig())
+        line = next((l for l in diag_lines()[before:] if "event=overlay_backend" in l), "")
+        check("without layer-shell the fallback window is used",
+              ov.layered is False and "backend=fallback_window" in line, line)
+        check("the log says whether the fallback is degraded", "degraded=" in line, line)
+        degraded = getattr(ov, "degraded", None)
+        check(f"the pill knows its state on this display ({backend})",
+              degraded is wayland, f"degraded={degraded!r}")
+        check("logged as degraded=1 on Wayland, degraded=0 on X11",
+              ("degraded=1" in line) == wayland and ("degraded=0" in line) == (not wayland),
+              line)
+        check("the window asks for no decorations", ov._win.get_decorated() is False)
+        check("the window carries the NOTIFICATION type hint",
+              ov._win.get_type_hint() == Gdk.WindowTypeHint.NOTIFICATION)
+
+        moves = []
+        ov._win.move = lambda x, y: moves.append((x, y))
+        ov.debug_force_state("error", "fallback check")
+        if wayland:
+            check("no move() is pretended on a Wayland display", moves == [], str(moves))
+        else:
+            check("move() is used on X11", len(moves) == 1, str(moves))
+        # Where the backend does honour move(), the pill is placed.
+        ov.degraded = False
+        moves.clear()
+        ov._show()
+        check("move() is used where the backend honours it", len(moves) == 1, str(moves))
+        ov.degraded = degraded
+
+        before = len(diag_lines())
+        ov.preview.append("the preview panel falls back the same way")
+        ov.preview.show()
+        pline = next((l for l in diag_lines()[before:] if "event=preview_backend" in l), "")
+        check("the preview panel's fallback is logged with the same flag",
+              "backend=fallback_window" in pline and "degraded=" in pline
+              and ("degraded=1" in pline) == wayland, pline)
+        ov.debug_release()
+        ov.shutdown()
+    finally:
+        GtkLayerShell.is_supported = orig
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = [defect2_config_load, defect3_engine_stop,
             defect4_single_instance, defect5_missing_helper_named,
-            defect6_clipboard_verbatim]
+            defect6_clipboard_verbatim, defect7_overlay_fallback_honest]
 
 
 def main():
