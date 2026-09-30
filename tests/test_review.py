@@ -923,6 +923,70 @@ def review12_tests_locate_the_checkout_from_file():
 
 
 # ---------------------------------------------------------------------------
+# #13 FocusTracker.snapshot() is cache-only; isScriptLoaded lives on a timer.
+# ---------------------------------------------------------------------------
+
+class CountingBus:
+    def __init__(self):
+        self.sync, self.async_, self.callback = [], [], None
+
+    def call_sync(self, _service, _path, _iface, method, *_a):
+        self.sync.append(method)
+        return GLib.Variant("(b)", (True,))
+
+    def call(self, _service, _path, _iface, method, _params, _reply_type, _flags,
+             _timeout, _cancellable, callback, *_user):
+        self.async_.append(method)
+        self.callback = callback
+
+    def call_finish(self, _result):
+        return GLib.Variant("(b)", (False,))       # "not loaded"
+
+
+class _Invocation:
+    def return_value(self, _v):
+        pass
+
+
+def review13_focus_snapshot_is_cache_only():
+    print("\n[#13] snapshot() makes no D-Bus call")
+    from parakeet_dictation import focus as da_focus
+    da_focus.DIAG = TEST_DIAG
+    tracker = da_focus.FocusTracker(enabled=True)
+    bus = CountingBus()
+    tracker._bus = bus
+    tracker._loaded = False                 # the state that used to trigger a recheck
+    tracker._last_check = 0.0
+    tracker._on_report(None, None, None, None, None,
+                       GLib.Variant("(ssss)", ("kitty", "kitty", "doc", "4242")), _Invocation())
+    snap = tracker.snapshot()
+    check("snapshot() returns the cached report",
+          snap is not None and snap.resource_class == "kitty", str(snap))
+    check("and makes no D-Bus call, synchronous or otherwise",
+          bus.sync == [] and bus.async_ == [], f"sync={bus.sync} async={bus.async_}")
+    for _ in range(5):
+        tracker.snapshot()
+    check("no matter how often it is asked", bus.sync == [] and bus.async_ == [],
+          f"sync={bus.sync} async={bus.async_}")
+
+    loads = []
+    tracker._load = lambda reason: loads.append(reason) or True
+    recheck = getattr(tracker, "_recheck", None)
+    check("the periodic recheck exists", callable(recheck))
+    if callable(recheck):
+        cont = recheck()
+        check("the timer tick asks KWin asynchronously whether the script is loaded",
+              bus.async_ == ["isScriptLoaded"] and bus.sync == [] and cont is True,
+              f"sync={bus.sync} async={bus.async_} cont={cont!r}")
+        bus.callback(bus, None)
+        check("a script that went away is reloaded from the timer, not from a key release",
+              loads == ["stale"], str(loads))
+    tracker._timer_id = GLib.timeout_add_seconds(60, lambda: True)
+    tracker.stop()
+    check("stop() disarms the timer", getattr(tracker, "_timer_id", 1) == 0)
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
             2: review2_take_ends_even_if_the_typer_raises,
@@ -935,7 +999,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             9: review9_preview_keeps_going_beyond_the_window,
             10: review10_coalescer_disabled_counts_closed_blocks,
             11: review11_test_defects_runs_main_on_a_scratch_config,
-            12: review12_tests_locate_the_checkout_from_file}
+            12: review12_tests_locate_the_checkout_from_file,
+            13: review13_focus_snapshot_is_cache_only}
 
 
 def main(argv):
