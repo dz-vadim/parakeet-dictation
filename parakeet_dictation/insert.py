@@ -790,20 +790,30 @@ class TextTyper:
 
     # -- public API ---------------------------------------------------------
 
-    def type_text(self, text: str, target=None, on_done=None):
+    def type_text(self, text: str, target=None, on_done=None, not_before=None):
         """Queue final (committed) text — adds trailing space.  Returns at once.
 
         `target` is the focus snapshot the caller took when the take ended
         (whatever was focused at release, not 300 ms later); None means the
         class is unknown and the configured default chord applies.  `on_done`
-        runs on the worker thread once this paste has gone out.
+        runs on the worker thread once this paste has gone out.  `not_before`
+        is a monotonic time the chord must not be sent before: right after
+        the hotkey release its modifier is often still physically held.
         """
         text = self._sanitize(text)
         if not text:
             if on_done is not None:
                 self.after_pending(on_done)
             return
-        self._submit(lambda: self._type_raw(text + " ", target), on_done)
+
+        def job():
+            if not_before is not None:
+                wait = not_before - time.monotonic()
+                if wait > 0:
+                    time.sleep(wait)
+            self._type_raw(text + " ", target)
+
+        self._submit(job, on_done)
 
     def type_partial(self, text: str, target=None):
         """Queue a streaming partial, erasing the previous partial first."""

@@ -69,6 +69,7 @@ class DictationController:
         self._take_chunks: list = []   # decoded, not yet inserted (end_of_take)
         self._take_inserts = 0
         self._take_stop_t0 = 0.0
+        self._release_t = 0.0      # when the hotkey release came in
         self._last_insert_t = 0.0
         # Focused-window probe (FocusTracker.snapshot) and the snapshot taken
         # the moment the take ended — the paste target is whatever was focused
@@ -319,6 +320,7 @@ class DictationController:
             # The target is fixed HERE, at the release: the decode still has
             # a few hundred ms to run and the user may already be elsewhere.
             self._focus_at_release = self._snapshot_focus("release")
+            self._release_t = time.monotonic()
         if decision == STOP_PROCEED:
             # UI first, capture second: the pill must not wait out the tail.
             self._overlay_state("processing")
@@ -496,11 +498,20 @@ class DictationController:
         target = self._focus_at_release
         if target is None and not self._take_stop_t0:
             target = self._snapshot_focus("insert")
+        # After a hotkey release the modifier may still be physically held;
+        # the chord must not go out before paste_min_delay_ms have passed.
+        not_before = None
+        hold_off_ms = 0.0
+        if self._release_t:
+            delay_s = max(0, int(self._config.paste_min_delay_ms)) / 1000.0
+            not_before = self._release_t + delay_s
+            hold_off_ms = max(0.0, (not_before - time.monotonic()) * 1000)
         DIAG.log("take_insert", mode=self._config.insert_mode,
                  index=self._take_inserts, chars=len(text), segments=segments,
-                 waited_ms=waited_ms, take=self._take_seq,
+                 waited_ms=waited_ms, hold_off_ms=hold_off_ms, take=self._take_seq,
                  target=(getattr(target, "resource_class", "") or "unknown"))
-        self._typer.type_text(text, target=target, on_done=on_done)
+        self._typer.type_text(text, target=target, on_done=on_done,
+                              not_before=not_before)
         if self._status_callback:
             self._status_callback("")
 
@@ -537,6 +548,7 @@ class DictationController:
         self._take_stop_t0 = 0.0
         self._last_insert_t = 0.0
         self._focus_at_release = None
+        self._release_t = 0.0
         self._enter(GESTURE_IDLE, outcome)
         if reopen:
             # The engine handles the hand-over: a start that finds the

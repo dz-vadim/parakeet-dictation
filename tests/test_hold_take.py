@@ -264,7 +264,7 @@ class FakeOverlay:
 
 def run_take(audio, release_at_audio_s, insert_mode, label, preview=True,
              coalesce=0.0, preview_interval=0.0, normalize=True,
-             focus=None, after_release=None):
+             focus=None, after_release=None, paste_min_delay_ms=0):
     """Hold the key, release it after `release_at_audio_s` of audio, report.
 
     The release is triggered off how much of the script the microphone has
@@ -297,7 +297,8 @@ def run_take(audio, release_at_audio_s, insert_mode, label, preview=True,
                                  insert_mode=insert_mode,
                                  preview=preview, coalesce_target_s=coalesce,
                                  preview_interval_s=preview_interval,
-                                 normalize=normalize)
+                                 normalize=normalize,
+                                 paste_min_delay_ms=paste_min_delay_ms)
     ctl = da_controller.DictationController(config)
     overlay = FakeOverlay(config)
     ctl.set_overlay(overlay)
@@ -1135,6 +1136,44 @@ def part6_preview_pass():
           and not [l for l in lines2 if "event=preview_pass" in l])
 
 
+def part7_paste_delay():
+    """The chord must not go out until the modifier of the push-to-talk key is
+    off.  kglobalaccel reports the release when the FIRST key of Meta+Z goes
+    up; Meta is typically still held for a few hundred ms, and a chord sent
+    then carries Super — kitty forwards it as a bare 'v', GTK/Qt ignore it.
+    The key state cannot be read, so the controller holds the paste back for
+    paste_min_delay_ms after the release."""
+    print("\n[7] paste held back after the release")
+    # A full phrase followed by silence: a phrase cut mid-word can decode to
+    # nothing (a known TDT quirk), which would make both takes "no speech".
+    audio = np.concatenate([SPEECH_B, quiet(1.2)])
+    release = len(SPEECH_B) / SR + 0.6
+
+    marks, pastes, lines, _ = run_take(audio, release, "end_of_take",
+                                       "  7a: paste_min_delay_ms=0 (control)",
+                                       paste_min_delay_ms=0)
+    check("control: one paste", len(pastes) == 1, f"{len(pastes)} pastes")
+    if pastes:
+        gap = pastes[0][0] - marks["release"]
+        check("control: paste lands shortly after the release tail (< 0.5 s)",
+              0.15 < gap < 0.5, f"{gap*1000:.0f} ms after release")
+
+    marks, pastes, lines, _ = run_take(audio, release, "end_of_take",
+                                       "  7b: paste_min_delay_ms=700",
+                                       paste_min_delay_ms=700)
+    check("delayed: still exactly one paste", len(pastes) == 1, f"{len(pastes)} pastes")
+    if pastes:
+        gap = pastes[0][0] - marks["release"]
+        check("delayed: the chord waits >= 700 ms after the release",
+              gap >= 0.70, f"{gap*1000:.0f} ms after release")
+        check("delayed: but not much longer than asked (< 1.2 s)",
+              gap < 1.2, f"{gap*1000:.0f} ms after release")
+    insert_line = [l for l in lines if "event=take_insert" in l]
+    check("take_insert logs how long the paste was held off",
+          bool(insert_line) and "hold_off_ms=" in insert_line[-1],
+          insert_line[-1][-80:] if insert_line else "no take_insert line")
+
+
 def part3_clipboard():
     print("\n[6] clipboard save/restore across back-to-back insertions")
     PASTES.clear()
@@ -1317,6 +1356,7 @@ def main():
     part5b_normalize()
     part5c_take()
     part6_preview_pass()
+    part7_paste_delay()
     part3_clipboard()
 
     print("\n" + "=" * 72)

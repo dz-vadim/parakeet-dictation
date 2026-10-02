@@ -128,6 +128,16 @@ class AppConfig:
     # available, ydotool otherwise.
     paste_transport: str = "auto"
 
+    # The push-to-talk release is reported when the FIRST key of the
+    # combination goes up, and the modifier (Meta in Meta+Z) is usually still
+    # held for a few hundred ms.  A chord sent in that window carries Super
+    # and is not a paste anywhere: kitty forwards it to the app as a bare
+    # 'v', GTK and Qt match modifiers exactly and do nothing.  KWin refuses
+    # a virtual keyboard's release of a physically held key, and the key
+    # state is unreadable without the input group, so the chord simply waits
+    # this long after the release.  0 disables the hold-off.
+    paste_min_delay_ms: int = 350
+
     # Learn the focused window from a resident KWin script so the chord can
     # be chosen per app.  Off, or on a compositor without KWin scripting, the
     # target is "unknown" and `paste_chord` is used everywhere.
