@@ -371,13 +371,10 @@ class TranscriptPreview:
         cr.paint()
         cr.set_operator(cairo.Operator.OVER)
 
-        # Same dark translucent fill and hairline as the pill.
+        # Same dark translucent fill as the pill (no border).
         PillOverlay._rounded_rect(cr, 0.5, 0.5, width - 1, height - 1, self.RADIUS)
-        cr.set_source_rgba(0, 0, 0, 0.9)
-        cr.fill_preserve()
-        cr.set_source_rgba(1, 1, 1, 0.1)
-        cr.set_line_width(1)
-        cr.stroke()
+        cr.set_source_rgba(0, 0, 0, 0.8)
+        cr.fill()
 
         rows = self._rows
         if not rows:
@@ -853,11 +850,8 @@ class PillOverlay:
 
         radius = self.ERROR_RADIUS if self._state == "error" else height / 2
         self._rounded_rect(cr, 0.5, 0.5, width - 1, height - 1, radius)
-        cr.set_source_rgba(0, 0, 0, 0.9)
-        cr.fill_preserve()
-        cr.set_source_rgba(1, 1, 1, 0.1)
-        cr.set_line_width(1)
-        cr.stroke()
+        cr.set_source_rgba(0, 0, 0, 0.8)
+        cr.fill()
 
         if self._state == "error":
             self._draw_error(cr, width, height)
