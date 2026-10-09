@@ -7,6 +7,15 @@ from ..controller import DictationController
 from ..hotkeys import HotkeyManager
 from ..models import _is_model_downloaded
 from .windows import MainWindow, SettingsDialog
+from pathlib import Path
+
+_ICONS_DIR = Path(__file__).resolve().parent.parent / "data" / "icons"
+ICON_STYLES = (("mic", "Microphone"), ("parrot", "Parrot"), ("wave", "Waveform"))
+_LEGACY_ICON = {
+    "idle": "audio-input-microphone-muted",
+    "listening": "audio-input-microphone",
+    "paused": "audio-input-microphone-muted",
+}
 
 # ---------------------------------------------------------------------------
 # System tray
@@ -24,6 +33,10 @@ class TrayIcon:
             "audio-input-microphone-muted",
             AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS,
         )
+        self._custom_icons = (_ICONS_DIR / "parakeet-mic-idle.svg").is_file()
+        if self._custom_icons:
+            self._indicator.set_icon_theme_path(str(_ICONS_DIR))
+            self._indicator.set_icon_full(self._icon_name("idle"), "Idle")
         self._indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.ACTIVE)
         self._indicator.set_title(APP_NAME)
 
@@ -77,6 +90,22 @@ class TrayIcon:
         model_menu_item.set_submenu(model_submenu)
         menu.append(model_menu_item)
 
+        # Tray icon style submenu
+        if getattr(self, "_custom_icons", False):
+            icon_menu_item = Gtk.MenuItem(label="Tray Icon")
+            icon_submenu = Gtk.Menu()
+            active_style = getattr(cfg, "tray_icon_style", "mic")
+            for style, label in ICON_STYLES:
+                text = f"\u2713 {label}" if style == active_style else f"  {label}"
+                item = Gtk.MenuItem(label=text)
+                if style != active_style:
+                    item.connect("activate", self._on_switch_icon_style, style)
+                else:
+                    item.set_sensitive(False)
+                icon_submenu.append(item)
+            icon_menu_item.set_submenu(icon_submenu)
+            menu.append(icon_menu_item)
+
         menu.append(Gtk.SeparatorMenuItem())
 
         settings_item = Gtk.MenuItem(label="Settings")
@@ -91,6 +120,20 @@ class TrayIcon:
 
         menu.show_all()
         self._indicator.set_menu(menu)
+
+    def _icon_name(self, state: str) -> str:
+        """Themed icon name for a state, honouring tray_icon_style."""
+        if getattr(self, "_custom_icons", False):
+            style = getattr(self._controller.config, "tray_icon_style", "mic")
+            if style not in ("mic", "parrot", "wave"):
+                style = "mic"
+            return f"parakeet-{style}-{state}"
+        return _LEGACY_ICON[state]
+
+    def _on_switch_icon_style(self, _item, style):
+        cfg = self._controller.config
+        cfg.tray_icon_style = style
+        self.apply_settings(cfg)
 
     def _on_switch_model(self, _item, model_id):
         cfg = self._controller.config
@@ -109,16 +152,16 @@ class TrayIcon:
         if running:
             if paused:
                 self._toggle_item.set_label("Resume Dictation")
-                self._indicator.set_icon_full("audio-input-microphone-muted", "Paused")
+                self._indicator.set_icon_full(self._icon_name("paused"), "Paused")
             else:
                 key = cfg.hotkey_toggle if cfg.hotkey_mode == "toggle" else cfg.hotkey_stop
                 self._toggle_item.set_label(f"Stop Dictation ({key})")
-                self._indicator.set_icon_full("audio-input-microphone", "Listening")
+                self._indicator.set_icon_full(self._icon_name("listening"), "Listening")
             self._pause_item.set_sensitive(True)
         else:
             key = cfg.hotkey_toggle if cfg.hotkey_mode == "toggle" else cfg.hotkey_start
             self._toggle_item.set_label(f"Start Dictation ({key})")
-            self._indicator.set_icon_full("audio-input-microphone-muted", "Idle")
+            self._indicator.set_icon_full(self._icon_name("idle"), "Idle")
             self._pause_item.set_sensitive(False)
             self._status_item.set_label("Idle")
 

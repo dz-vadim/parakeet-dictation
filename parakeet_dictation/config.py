@@ -172,6 +172,7 @@ class AppConfig:
     # Pill overlay — compact always-visible-while-active status capsule
     overlay: bool = True
     overlay_position: str = "bottom"  # "bottom" or "top"
+    tray_icon_style: str = "mic"  # "mic", "parrot" or "wave"
 
     # Live transcript preview — a floating, display-only panel above the pill
     # showing the segments of the current take that have already decoded.
@@ -213,6 +214,11 @@ class AppConfig:
             forced.append("insert_mode")
             report("config_forced", key="insert_mode", value="end_of_take",
                    reason="hold_mode")
+        if self.tray_icon_style not in ("mic", "parrot", "wave"):
+            self.tray_icon_style = "mic"
+            forced.append("tray_icon_style")
+            report("config_forced", key="tray_icon_style", value="mic",
+                   reason="unknown_style")
         return forced
 
     @staticmethod
