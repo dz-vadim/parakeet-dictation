@@ -1,7 +1,11 @@
 """Render the real settings window pages to PNG (offscreen) for review.
 
-Run:  .venv/bin/python tools/render-settings.py OUTDIR [uk|en]
+Run:  .venv/bin/python tools/render-settings.py OUTDIR [uk|en] [--user-config]
+
+The pages show the default settings unless --user-config asks for the
+user's own config.json (read only, never written).
 """
+import argparse
 import sys
 from pathlib import Path
 
@@ -14,11 +18,18 @@ from parakeet_dictation import i18n  # noqa: E402
 from parakeet_dictation.config import AppConfig  # noqa: E402
 from parakeet_dictation.models import load_model_profiles  # noqa: E402
 
-out = Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
-i18n.setup(sys.argv[2] if len(sys.argv) > 2 else "uk")
+ap = argparse.ArgumentParser(description="Render the settings pages to PNG.")
+ap.add_argument("outdir", type=Path)
+ap.add_argument("language", nargs="?", default="uk", choices=("uk", "en"))
+ap.add_argument("--user-config", action="store_true",
+                help="render the user's config.json instead of the defaults")
+args = ap.parse_args()
+out = args.outdir
+out.mkdir(parents=True, exist_ok=True)
+i18n.setup(args.language)
 from parakeet_dictation.ui.settings import SettingsWindow  # noqa: E402
 
-cfg = AppConfig.load()
+cfg = AppConfig.load() if args.user_config else AppConfig()
 win = SettingsWindow(lambda: cfg, load_model_profiles(), lambda c: (True, ""), lambda: None)
 child = win.get_child()
 win.remove(child)
