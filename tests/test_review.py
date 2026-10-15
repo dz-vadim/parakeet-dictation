@@ -2020,6 +2020,85 @@ def review29_config_save_atomic_and_xdg():
     check("an empty XDG_CONFIG_HOME falls back to ~/.config",
           out == str(Path.home() / ".config" / "parakeet-dictation"), out)
 
+
+# ---------------------------------------------------------------------------
+# #30 (E3)  Model downloads are pinned to a Hugging Face commit and checked
+#     against a sha256 before they are renamed into place.
+# ---------------------------------------------------------------------------
+
+class _FakeHTTP:
+    """requests.get for _download_file: `payload` in 64 KiB chunks, an
+    optional delay per chunk and an optional failure 3/4 of the way in."""
+
+    def __init__(self, payload, delay=0.0, fail=False):
+        self.headers = {"content-length": str(len(payload))}
+        self._payload, self._delay, self._fail = payload, delay, fail
+
+    def raise_for_status(self):
+        pass
+
+    def iter_content(self, n):
+        step = 65536
+        for i in range(0, len(self._payload), step):
+            if self._delay:
+                time.sleep(self._delay)
+            if self._fail and i >= len(self._payload) * 3 // 4:
+                raise ConnectionError("connection reset by peer")
+            yield self._payload[i:i + step]
+
+
+def _with_fake_requests(get, fn):
+    from types import SimpleNamespace
+    saved = sys.modules.get("requests")
+    sys.modules["requests"] = SimpleNamespace(get=get)
+    try:
+        return fn()
+    finally:
+        if saved is None:
+            sys.modules.pop("requests", None)
+        else:
+            sys.modules["requests"] = saved
+
+
+def review30_model_downloads_pinned_and_verified():
+    print("\n[#30 E3] model URLs are pinned and every file is sha256-checked")
+    import hashlib
+    import re
+    from parakeet_dictation import models as da_models
+    files = [(pid, role, info) for pid, prof in da_models.load_model_profiles()["profiles"].items()
+             for role, info in prof["files"].items()]
+    unpinned = [f"{pid}/{role}" for pid, role, info in files
+                if not re.search(r"/resolve/[0-9a-f]{40}/", info["url"])]
+    check("every URL resolves a fixed commit, not a branch", unpinned == [], str(unpinned))
+    unsummed = [f"{pid}/{role}" for pid, role, info in files
+                if not re.fullmatch(r"[0-9a-f]{64}", str(info.get("sha256", "")))]
+    check("every file carries a sha256", unsummed == [], str(unsummed))
+
+    payload = bytes(range(256)) * 1024
+    good = hashlib.sha256(payload).hexdigest()
+    with tempfile.TemporaryDirectory(prefix="parakeet-sha-") as tmp:
+        dest = Path(tmp) / "encoder.int8.onnx"
+
+        def run(sha):
+            try:
+                da_models._download_file("u", dest, sha256=sha)
+                return None
+            except Exception as e:      # noqa: BLE001
+                return e
+
+        err = _with_fake_requests(lambda *_a, **_k: _FakeHTTP(payload),
+                                  lambda: run("0" * 64))
+        check("a checksum mismatch raises", err is not None, repr(err))
+        check("and names the file", err is not None and dest.name in str(err), repr(err))
+        check("nothing is left behind (no final file, no temp)",
+              not list(Path(tmp).iterdir()), str([p.name for p in Path(tmp).iterdir()]))
+        err = _with_fake_requests(lambda *_a, **_k: _FakeHTTP(payload), lambda: run(good))
+        check("a matching checksum lands the file", err is None and dest.read_bytes() == payload,
+              repr(err))
+        check("under its final name only",
+              [p.name for p in Path(tmp).iterdir()] == [dest.name],
+              str([p.name for p in Path(tmp).iterdir()]))
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -2050,7 +2129,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             26: review26_audio_device_by_name,
             27: review27_int16_clip_and_beep_errors,
             28: review28_enforce_validates_enums_and_ranges,
-            29: review29_config_save_atomic_and_xdg}
+            29: review29_config_save_atomic_and_xdg,
+            30: review30_model_downloads_pinned_and_verified}
 
 
 def main(argv):

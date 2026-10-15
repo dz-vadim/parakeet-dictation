@@ -13,6 +13,7 @@ TEN VAD, which ships inside the ten-vad pip package (see audio.py); nothing
 is fetched for it.
 """
 
+import hashlib
 import json
 import sys
 import threading
@@ -75,26 +76,49 @@ def _is_model_downloaded(model_id: str, profiles: dict) -> bool:
     return True
 
 
-def _download_file(url: str, dest: Path, on_progress_bytes=None):
-    """Download a single file with progress reporting. Raises on failure."""
+def _download_file(url: str, dest: Path, on_progress_bytes=None, sha256=None):
+    """Download a single file with progress reporting. Raises on failure.
+
+    The bytes land in a temp file that is renamed to `dest` only once the
+    transfer is complete and, when `sha256` is given (every file in
+    models.json has one), the digest matches — so a truncated, corrupted or
+    swapped download is never mistaken for a model.
+    """
     import requests
 
     resp = requests.get(url, stream=True, timeout=(15, 60))
     resp.raise_for_status()
     total = int(resp.headers.get("content-length", 0))
     downloaded = 0
+    digest = hashlib.sha256()
     tmp = dest.with_suffix(dest.suffix + ".part")
     try:
         with open(tmp, "wb") as f:
             for chunk in resp.iter_content(1024 * 1024):
                 f.write(chunk)
+                digest.update(chunk)
                 downloaded += len(chunk)
                 if on_progress_bytes:
                     on_progress_bytes(downloaded, total)
+        if sha256 and digest.hexdigest() != sha256.lower():
+            raise ValueError(f"checksum mismatch for {dest.name}: expected "
+                             f"{sha256[:12]}…, got {digest.hexdigest()[:12]}…")
         tmp.rename(dest)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def _have_file(dest: Path, info: dict) -> bool:
+    """Whether `dest` already holds this file: present, non-empty and, when
+    models.json gives a size, exactly that size (a file left by an older
+    unverified download that was cut short is fetched again)."""
+    try:
+        size = dest.stat().st_size
+    except OSError:
+        return False
+    expected = info.get("size")
+    return size > 0 and (not expected or size == expected)
 
 
 def _download_model(model_id: str, profiles_data: dict, on_progress, on_done):
@@ -111,7 +135,7 @@ def _download_model(model_id: str, profiles_data: dict, on_progress, on_done):
             total_files = len(files)
             for i, (key, info) in enumerate(files.items(), 1):
                 dest = model_dir / info["filename"]
-                if dest.exists() and dest.stat().st_size > 0:
+                if _have_file(dest, info):
                     continue
 
                 def _file_progress(done, total, fname=info["filename"], idx=i):
@@ -128,7 +152,8 @@ def _download_model(model_id: str, profiles_data: dict, on_progress, on_done):
                         mb = done / 1024 / 1024
                         GLib.idle_add(on_progress, f"{fname}: {mb:.0f} MB", -1.0)
 
-                _download_file(info["url"], dest, _file_progress)
+                _download_file(info["url"], dest, _file_progress,
+                               sha256=info.get("sha256"))
 
             GLib.idle_add(on_done, True, "")
         except Exception as e:
@@ -150,7 +175,7 @@ def _download_all_models(profiles_data: dict, on_progress, on_done):
                 total_files = len(files)
                 for i, (key, info) in enumerate(files.items(), 1):
                     dest = model_dir / info["filename"]
-                    if dest.exists() and dest.stat().st_size > 0:
+                    if _have_file(dest, info):
                         continue
                     short_name = profile["name"][:18]
 
@@ -164,7 +189,8 @@ def _download_all_models(profiles_data: dict, on_progress, on_done):
                             mb = done / 1024 / 1024
                             GLib.idle_add(on_progress, f"{sn}: {fname} {mb:.0f} MB", -1.0)
 
-                    _download_file(info["url"], dest, _file_progress)
+                    _download_file(info["url"], dest, _file_progress,
+                                   sha256=info.get("sha256"))
             GLib.idle_add(on_done, True, "")
         except Exception as e:
             GLib.idle_add(on_done, False, str(e))
@@ -176,7 +202,7 @@ def _download_all_models(profiles_data: dict, on_progress, on_done):
 # Command-line downloader (formerly download_models.py)
 # ---------------------------------------------------------------------------
 
-def download_file(url: str, dest: Path):
+def download_file(url: str, dest: Path, sha256=None):
     """CLI download with a progress bar, through the same atomic path the
     GUI uses: the bytes land in `<dest>.part` and are renamed only once the
     transfer is complete.  Writing `dest` directly, as this did, let a
@@ -191,7 +217,7 @@ def download_file(url: str, dest: Path):
                 bar.refresh()
             bar.update(done - bar.n)
 
-        _download_file(url, dest, progress)
+        _download_file(url, dest, progress, sha256=sha256)
 
 
 def download_profile(config: dict, profile_id: str):
@@ -209,11 +235,11 @@ def download_profile(config: dict, profile_id: str):
 
     for key, info in profile["files"].items():
         dest = profile_dir / info["filename"]
-        if dest.exists() and dest.stat().st_size > 0:
+        if _have_file(dest, info):
             print(f"  {info['filename']} already exists.")
             continue
         print(f"Downloading {info['filename']}...")
-        download_file(info["url"], dest)
+        download_file(info["url"], dest, sha256=info.get("sha256"))
 
 
 def main():
