@@ -52,15 +52,14 @@ What it is not:
 
 ### Arch Linux (AUR)
 
-The package is `parakeet-dictation-git`; its TEN VAD dependency is `python-ten-vad-bin`. Both
-PKGBUILDs live in this repository (`packaging/` and `packaging/deps/python-ten-vad-bin/`), and
-the other dependencies (`python-sherpa-onnx`, `python-sounddevice`, `python-pynput`) are on the AUR.
+The package is [`parakeet-dictation-git`](https://aur.archlinux.org/packages/parakeet-dictation-git);
+its TEN VAD dependency is [`python-ten-vad-bin`](https://aur.archlinux.org/packages/python-ten-vad-bin).
+Their PKGBUILDs are also kept in this repository (`packaging/` and
+`packaging/deps/python-ten-vad-bin/`). `python-sherpa-onnx` is built from source by the AUR
+helper and takes a while.
 
 ```sh
-yay -S parakeet-dictation-git                  # once it is published on the AUR
-# until then, from a checkout:
-(cd packaging/deps/python-ten-vad-bin && makepkg -si)
-(cd packaging && makepkg -si)
+yay -S parakeet-dictation-git                  # pulls python-ten-vad-bin, python-sherpa-onnx, ...
 
 parakeet-dictation-models desktop              # 639 MB, into ~/.local/share/parakeet-dictation/models/
 systemctl --user enable --now ydotool          # fallback chord transport
