@@ -60,18 +60,28 @@ def _is_night_mode(config: "AppConfig") -> bool:
 _active_config: "AppConfig | None" = None
 
 
+def _play(samples, samplerate):
+    """sd.play, contained: a beep is feedback, and an output device that is
+    busy, gone or misconfigured must never fail the take it belongs to (the
+    stop beep runs in the capture thread's finally)."""
+    try:
+        sd.play(samples, samplerate=samplerate)
+    except Exception as e:
+        DIAG.log("beep_failed", err=type(e).__name__)
+
+
 def play_beep_start(volume: float = 0.5):
     """Rising tone — dictation started."""
     if _active_config and _is_night_mode(_active_config):
         return
-    sd.play(_generate_tone(880, 0.15, volume), samplerate=SAMPLE_RATE)
+    _play(_generate_tone(880, 0.15, volume), samplerate=SAMPLE_RATE)
 
 
 def play_beep_stop(volume: float = 0.5):
     """Falling tone — dictation stopped."""
     if _active_config and _is_night_mode(_active_config):
         return
-    sd.play(_generate_tone(440, 0.15, volume), samplerate=SAMPLE_RATE)
+    _play(_generate_tone(440, 0.15, volume), samplerate=SAMPLE_RATE)
 
 
 def play_beep_pause(volume: float = 0.5):
@@ -81,7 +91,7 @@ def play_beep_pause(volume: float = 0.5):
     t1 = _generate_tone(660, 0.07, volume)
     gap = np.zeros(int(SAMPLE_RATE * 0.05), dtype=np.float32)
     t2 = _generate_tone(660, 0.07, volume)
-    sd.play(np.concatenate([t1, gap, t2]), samplerate=SAMPLE_RATE)
+    _play(np.concatenate([t1, gap, t2]), samplerate=SAMPLE_RATE)
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +204,9 @@ class TenVadDetector:
         """Feed float32 audio samples (matching sounddevice output)."""
         # Convert to int16 for TEN VAD
         arr = np.asarray(samples, dtype=np.float32).reshape(-1)
-        int16_data = (arr * 32767).astype(np.int16)
+        # Clipped first: a hot input (> 1.0) wrapped around in astype and
+        # turned a loud peak into a full-scale swing of the opposite sign.
+        int16_data = (np.clip(arr, -1.0, 1.0) * 32767).astype(np.int16)
 
         # Prepend any leftover from the previous call.  BOTH views, and always
         # together: a 100 ms block is 6.25 hops, so there is a leftover on

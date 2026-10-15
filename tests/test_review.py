@@ -1846,6 +1846,50 @@ def review26_audio_device_by_name():
         if saved[1] is not None:
             da_audio.DIAG = saved[1]
 
+
+# ---------------------------------------------------------------------------
+# #27 (E6, E7)  Audio robustness: a clipping input (> 1.0 after a hot gain
+#     stage) saturates in the VAD's int16 copy instead of wrapping to the
+#     opposite sign, and a beep that cannot play never takes a take down.
+# ---------------------------------------------------------------------------
+
+def review27_int16_clip_and_beep_errors():
+    print("\n[#27 E6 E7] the VAD's int16 copy saturates; beep errors are contained")
+    seen = []
+
+    class Recording(ScriptedTenVad):
+        def process(self, chunk):
+            seen.append(np.array(chunk))
+            return super().process(chunk)
+
+    vad = da_audio.TenVadDetector()
+    vad._vad = Recording([0.0] * 8)
+    block = np.concatenate([np.full(HOP, 1.5, np.float32), np.full(HOP, -1.5, np.float32)])
+    vad.accept_waveform(block)
+    hi = int(seen[0].max()) if seen else None
+    lo = int(seen[1].min()) if len(seen) > 1 else None
+    check("+1.5 becomes +32767, not a wrapped negative", hi == 32767, str(hi))
+    check("-1.5 becomes -32767, not a wrapped positive", lo == -32767, str(lo))
+
+    saved = (da_audio.sd.play, da_audio._active_config)
+    da_audio._active_config = None
+
+    def broken_play(*_a, **_k):
+        raise da_audio.sd.PortAudioError("Device unavailable")
+
+    da_audio.sd.play = broken_play
+    try:
+        for fn in (da_audio.play_beep_start, da_audio.play_beep_stop,
+                   da_audio.play_beep_pause):
+            try:
+                fn(0.5)
+                err = None
+            except Exception as e:      # noqa: BLE001 — that is the bug
+                err = e
+            check(f"{fn.__name__} swallows a PortAudio error", err is None, repr(err))
+    finally:
+        da_audio.sd.play, da_audio._active_config = saved
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1873,7 +1917,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             23: review23_privacy,
             24: review24_late_text_is_not_pasted_into_the_next_take,
             25: review25_mic_error_keeps_captured_speech,
-            26: review26_audio_device_by_name}
+            26: review26_audio_device_by_name,
+            27: review27_int16_clip_and_beep_errors}
 
 
 def main(argv):
