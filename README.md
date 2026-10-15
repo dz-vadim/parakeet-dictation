@@ -3,14 +3,16 @@
 Local, offline voice dictation for KDE Plasma 6 on Wayland, tuned for Ukrainian and English.
 Speech is recognised on the CPU by NVIDIA Parakeet TDT 0.6B v3 (int8) through
 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx); phrases are found by
-[TEN VAD](https://github.com/TEN-framework/ten-vad). Interaction is push-to-talk: the app
-registers its own shortcut with kglobalaccel over D-Bus, so it is told about the key's press
-*and* its release. Hold the key to speak; let go and the text is pasted once into the window
-that had focus at the moment of release. While the key is held, a pill shows the microphone
+[TEN VAD](https://github.com/TEN-framework/ten-vad). The app registers two
+shortcuts of its own with kglobalaccel over D-Bus, so it is told about each key's press *and*
+release: **Insert** is push-to-talk (hold, speak, let go) and **Meta+Insert** starts and stops a
+longer dictation. For push-to-talk the text is pasted once into the window that had focus at
+the moment of release. While the key is held, a pill shows the microphone
 level and the elapsed time, and a display-only preview above it shows what has been decoded so
 far. The paste chord is chosen from the focused window's class (a resident KWin script reports
 it) and pressed as keysyms through the xdg-desktop-portal RemoteDesktop session, so it works
-under any keyboard layout. A tray icon gives access to start/stop, model switching and settings.
+under any keyboard layout. A tray icon gives access to start/stop, microphone and model switching and the settings window;
+the interface is in Ukrainian or English.
 
 This is a fork of [danielrosehill/Parakeet-Type-Ubuntu](https://github.com/danielrosehill/Parakeet-Type-Ubuntu),
 the upstream single-file Ubuntu toggle app. This repository is
@@ -19,12 +21,10 @@ the upstream single-file Ubuntu toggle app. This repository is
 What it is not:
 
 - Not for X11. `xdotool` remains only as a last-resort chord transport and reaches XWayland windows only.
-- Push-to-talk and focused-window detection need KDE: kglobalaccel for the hold shortcut, KWin
-  scripting for the window class. On another Wayland compositor the app still runs in toggle mode
-  (driven by SIGUSR1) and, with the target unknown, pastes with `paste_chord` (Ctrl+V) everywhere.
-- The pynput bindings (`hotkey_toggle`, `hotkey_start`, `hotkey_stop`, `hotkey_pause`) cannot grab
-  keys on Wayland outside the app's own windows; toggle and pause are driven by SIGUSR1/SIGUSR2 from
-  a desktop shortcut instead.
+- The shortcuts and focused-window detection need KDE: kglobalaccel for the two shortcuts, KWin
+  scripting for the window class. On another Wayland compositor the app still runs, driven from the
+  tray menu or by SIGUSR1 (start/stop) and SIGUSR2 (pause) sent from a desktop shortcut, and, with
+  the target unknown, pastes with `paste_chord` (Ctrl+V) everywhere.
 - The `laptop` (Canary 180M, EN/ES/DE/FR) and `streaming` (Nemotron 0.6B, English only) profiles are
   still selectable, but every measurement below was made with the `desktop` Parakeet profile.
 
@@ -43,7 +43,7 @@ What it is not:
   now also publishes `cp314` wheels and ten-vad is pure Python, so a 3.14 venv may work but is untested
   here. `uv venv --python 3.12` downloads 3.12 itself.
 - Python packages (`requirements.txt`, the same list as `pyproject.toml`): `sherpa-onnx>=1.12`,
-  `sounddevice>=0.4`, `pynput>=1.7`, `numpy`, `PyGObject`, `pycairo`, `ten-vad>=1.0.6`, `requests`
+  `sounddevice>=0.4`, `numpy`, `PyGObject`, `pycairo`, `ten-vad>=1.0.6`, `requests`
   (model downloads) and `tqdm` (the download CLI's progress bar).
 - About 2 GB of RAM for the desktop model while it is loaded; 639 MB of disk for its files.
 - Ubuntu and other distributions: untested since the fork.
@@ -69,9 +69,9 @@ systemctl --user enable --now ydotool          # fallback chord transport
   (`ls -l /dev/uinput`; the stock `80-uinput.rules` uses `input`) and log out and back in.
 - The first start asks once, through xdg-desktop-portal, whether the app may "Remote Control" the
   session. Approve it; the grant is kept as a restore token and not asked for again.
-- Then start "Parakeet Dictation" from the menu (or `parakeet-dictation`), hold Meta+Z, speak,
-  release. For autostart copy `/usr/share/applications/parakeet-dictation.desktop` to
-  `~/.config/autostart/`.
+- Then start "Parakeet Dictation" from the menu (or `parakeet-dictation`), hold Insert, speak,
+  release. For autostart tick "Start at login" in Settings > General, or copy
+  `/usr/share/applications/parakeet-dictation.desktop` to `~/.config/autostart/`.
 
 ### From a checkout
 
@@ -97,25 +97,26 @@ whether the app may "Remote Control" the session; approve it. The grant is persi
 restore token in `~/.config/parakeet-dictation/portal-restore-token` (mode 0600) and never asked
 for again unless it is revoked.
 
-Autostart, `~/.config/autostart/parakeet-dictation.desktop`:
+Autostart: tick "Start at login" in Settings > General (it writes
+`~/.config/autostart/parakeet-dictation.desktop`), or create that file by hand:
 
 ```ini
 [Desktop Entry]
 Type=Application
 Name=Parakeet Dictation
-Comment=Local voice dictation; registers its own push-to-talk shortcut at startup
+Comment=Local voice dictation; registers its own shortcuts at startup
 Exec=/home/you/Projects/parakeet-dictation/start.sh
 Icon=audio-input-microphone
 Terminal=false
 ```
 
-Push-to-talk is configured in `~/.config/parakeet-dictation/config.json`; the values this README
-describes are:
+The shortcuts are configured in Settings > General or in `~/.config/parakeet-dictation/config.json`;
+the values this README describes are:
 
 ```json
 {
-  "hotkey_mode": "hold",
-  "hotkey_hold": "Meta+Z",
+  "hotkey_hold": "Insert",
+  "hotkey_toggle": "Meta+Insert",
   "insert_mode": "end_of_take",
   "num_threads": 4
 }
@@ -123,13 +124,19 @@ describes are:
 
 ## Usage
 
-Hold **Meta+Z**, speak, release. Capture keeps running for 200 ms after the release so the last word
-is not clipped, while the pill switches to *processing* at once. Decoding runs on a worker thread
-the whole time the key is held; after the release the app waits for the decoder to drain, joins the
-decoded phrases with spaces, strips filler words (`um`, `uh`, `ehm`, ...) and pastes once. Text is
-inserted only after release: on KWin any injected keystroke is reported by kglobalaccel as a release
-of the held shortcut (Ctrl, V, Ctrl+V and Shift+Insert were each tried), so a mid-hold paste would
-end the take. That is what `insert_mode = "end_of_take"` is for; `per_segment` belongs to toggle mode.
+Two shortcuts, both changeable (see below):
+
+- **Hold to talk, `Insert`.** Hold the key, speak, release. Capture keeps running for 200 ms after
+  the release so the last word is not clipped, while the pill switches to *processing* at once.
+  Decoding runs on a worker thread the whole time the key is held; after the release the app waits
+  for the decoder to drain, joins the decoded phrases with spaces, strips filler words (`um`, `uh`,
+  `ehm`, ...) and pastes once. Text is inserted only after release, always, whatever `insert_mode`
+  says: on KWin any injected keystroke is reported by kglobalaccel as a release of the held
+  shortcut (Ctrl, V, Ctrl+V and Shift+Insert were each tried), so a mid-hold paste would end the take.
+- **Start / stop, `Meta+Insert`.** Press once to start, again to stop; this suits long dictation.
+  Here `insert_mode` applies: `end_of_take` (default) pastes once at the stop, `per_segment` pastes
+  each phrase as it is decoded. The same action is "Start Dictation" / "Stop Dictation" in the tray
+  menu and is driven by SIGUSR1.
 
 The pill (bottom centre by default, click-through, on the layer-shell overlay layer so panels keep
 their place):
@@ -168,17 +175,26 @@ retry is made; after that the text stays on the clipboard and the pill says
 Beeps: rising 880 Hz on start, falling 440 Hz on stop, a double 660 Hz on pause. `night_mode`
 silences them between `night_start` and `night_end` (22:00-09:00 by default).
 
-Changing the shortcut: set `hotkey_hold`, or use Settings > Hotkeys > "Hold key". The syntax is
-KDE/Qt: modifiers `Meta` (also `Super`, `Win`), `Alt`, `Ctrl`, `Shift`, joined with `+` to a single
+Changing the shortcuts: click the shortcut button in Settings > General, then press the new
+combination (Backspace disables the action, Esc cancels), or set `hotkey_hold` / `hotkey_toggle`.
+The two must differ; if they are equal the toggle falls back to its default (logged as
+`config_forced`). You can also change them in System Settings > Shortcuts; the app adopts the change
+(logged as `hotkey_changed_in_kde`) and saves it to the config. The syntax is KDE/Qt: modifiers `Meta` (also `Super`, `Win`), `Alt`, `Ctrl`, `Shift`, joined with `+` to a single
 character, `F1`-`F35`, or a named key (`Space`, `Insert`, `Return`, `Escape`, `Tab`, `Home`, `End`,
-`PageUp`, `PageDown`, `Left`, `Right`, `Up`, `Down`, ...). The action is listed in System Settings >
-Shortcuts as "Parakeet Dictation" / "Push-to-talk dictation". If another component already owns the
-key, kglobalaccel accepts the registration but keeps delivering the key to the first
-registrant; the app shows an error pill and logs `hold_hotkey_conflict` (see Troubleshooting).
+`PageUp`, `PageDown`, `Left`, `Right`, `Up`, `Down`, ...). The actions are listed in System Settings >
+Shortcuts as "Parakeet Dictation" / "Hold to talk" and "Start / stop dictation". If another component
+already owns a key, kglobalaccel accepts the registration but keeps delivering the key to the first
+registrant; the app shows an error pill and logs `hotkey_conflict` (see Troubleshooting).
 
-Toggle mode: `hotkey_mode = "toggle"` (or `"start_stop"`). On Wayland the pynput bindings do not
-work outside the app's own windows, so bind a KDE custom shortcut to a command that sends the
-signals: SIGUSR1 toggles, SIGUSR2 pauses. A minimal launcher, also usable as the shortcut target:
+Upgrading from an older version: `hotkey_hold` `Meta+Z` (the old default) becomes `Insert`, a
+pynput-style `hotkey_toggle` such as `<ctrl>+0` is dropped in favour of `Meta+Insert`, and
+`hotkey_mode`, `hotkey_start`, `hotkey_stop`, `hotkey_pause` are removed (logged as
+`config_migrated`). If a leftover launcher entry such as `parakeet-dictation-toggle.desktop` still
+holds a key in System Settings > Shortcuts, remove it there.
+
+Signals: SIGUSR1 starts/stops a take like the Start / stop shortcut, SIGUSR2 pauses and resumes.
+A KDE custom shortcut can use them through a small launcher, which also starts the app when it is
+not running:
 
 ```sh
 #!/usr/bin/env bash
@@ -190,16 +206,40 @@ fi
 kill -USR1 "$pid"
 ```
 
-Tray menu: Show Window (start/stop/pause buttons, microphone selector, streaming switch, status
-line), Start/Stop Dictation, Pause, a status line, Model (switch between downloaded profiles), Settings
-(tabs Models, Hotkeys, General, About), Quit.
+Tray menu (there is no main window): Start Dictation / Stop Dictation (shows the Start / stop
+shortcut), Pause / Resume while a take runs, Microphone (System default or a named device; a saved
+device that is unplugged stays listed as "not connected"), Model (the downloaded profiles, plus
+Download More... while some are missing), Settings..., About, Quit. The tooltip shows the state and
+the hold shortcut.
+
+Settings window (KDE System Settings style, sidebar with five pages; OK, Apply, Defaults and Cancel
+at the bottom):
+
+| Page | Holds |
+|---|---|
+| General | the two shortcuts, microphone, beeps and quiet hours, interface language, Start at login |
+| Recognition | model (use or download), language for Canary, live text preview, filler-word removal |
+| Text Output | when to insert (`insert_mode`), keep text on the clipboard, recording indicator and its position, tray icon style |
+| Advanced | CPU threads, pause that ends a phrase, paste delay, key-press method, terminal classes, diagnostics log |
+| About | version, licences |
+
+Problems on save (a shortcut used twice, a shortcut KDE refuses, a Start at login error) appear in
+an info bar at the top instead of being lost.
+
+Interface language: the interface is available in Ukrainian and English. `ui_language` is `system`
+(default: follows `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` or `LANG`; English when none of them names a
+language with a catalogue), `uk` or `en`. Change it in Settings > General > Interface language; it
+takes effect after the app restarts. Diagnostics stay in English. Translators: `tools/update-translations.sh`
+extracts the strings, merges them into
+`parakeet_dictation/locale/uk/LC_MESSAGES/parakeet-dictation.po` and compiles the `.mo` (needs gettext);
+`python tools/render-settings.py OUTDIR [uk|en]` renders the settings pages to PNG for review.
 
 ## Configuration
 
 `~/.config/parakeet-dictation/config.json` (`$XDG_CONFIG_HOME` is honoured); missing keys take the
 defaults below, unknown keys are ignored, and a value of the wrong type, outside its range or not one
 of the listed choices is replaced by its default (logged as `config_error` / `config_forced`).
-Saving from the Settings dialog rewrites the file atomically.
+Saving from the settings window rewrites the file atomically.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -220,14 +260,10 @@ Saving from the Settings dialog rewrites the file atomically.
 | `night_start` | int | `22` | hour beeps go quiet |
 | `night_end` | int | `9` | hour beeps resume |
 | **Hotkeys** | | | |
-| `hotkey_mode` | str | `"hold"` | `hold` (push-to-talk via kglobalaccel), `toggle` or `start_stop` |
-| `hotkey_hold` | str | `"Meta+Z"` | push-to-talk key, KDE/Qt syntax |
-| `hotkey_toggle` | str | `"<ctrl>+0"` | pynput binding for toggle mode |
-| `hotkey_start` | str | `"<ctrl>+9"` | pynput binding for start_stop mode |
-| `hotkey_stop` | str | `"<ctrl>+8"` | pynput binding for start_stop mode |
-| `hotkey_pause` | str | `"<ctrl>+<alt>+0"` | pynput binding for pause; empty disables |
+| `hotkey_hold` | str | `"Insert"` | hold-to-talk shortcut, KDE/Qt syntax; empty disables |
+| `hotkey_toggle` | str | `"Meta+Insert"` | start/stop shortcut, KDE/Qt syntax; empty disables; must differ from `hotkey_hold` |
 | **Insertion** | | | |
-| `insert_mode` | str | `"end_of_take"` | `end_of_take` pastes once after release (forced in hold mode, logged as `config_forced`); `per_segment` pastes each phrase as it decodes |
+| `insert_mode` | str | `"end_of_take"` | applies to start/stop takes: `end_of_take` pastes once at the stop, `per_segment` pastes each phrase as it decodes. Hold-to-talk takes always paste once at the release |
 | `typer` | str | `"clipboard"` | `clipboard` (stage + chord), `ydotool` (same, chord forced through ydotool), `wtype` (types the text directly; needs the virtual-keyboard protocol, labelled GNOME/Sway only in Settings) |
 | `paste_transport` | str | `"auto"` | how the chord is pressed: `portal`, `ydotool`, or `auto` (portal when its session is ready, else ydotool) |
 | `paste_chord` | str | `"ctrl+v"` | chord for unknown and unlisted windows; `ctrl+v`, `ctrl+shift+v` or `shift+insert` |
@@ -236,10 +272,12 @@ Saving from the Settings dialog rewrites the file atomically.
 | `no_ctrl_v_classes` | list | `["emacs", "Emacs"]` | classes that get Shift+Insert |
 | `paste_overrides` | dict | `{}` | `{window class: chord}`, wins over the tables |
 | `keep_on_clipboard` | bool | `false` | leave the dictated text on the clipboard instead of restoring the previous contents |
-| `paste_min_delay_ms` | int | `350` | the chord waits this long after the hotkey release (or any stop), because the shortcut's modifier is usually still held; `0` disables |
+| `paste_min_delay_ms` | int | `350` | the chord waits this long after a take ended by a shortcut that has a modifier (`Meta+Insert`, or a hold shortcut you gave one) or by SIGUSR1, because the modifier may still be held; a bare `Insert` release and a tray click do not wait; `0` disables |
 | `focus_script` | bool | `true` | load the KWin focus script; off, the target is always unknown |
 | `filter_fillers` | bool | `true` | drop `um`, `uh`, `ehm`, `hmm`, `er`, `ah`, `erm`, `hm` |
 | `partial_overwrite` | bool | `true` | streaming profile only: type partials and retype on revision (ignored in `end_of_take`) |
+| **Interface** | | | |
+| `ui_language` | str | `"system"` | `system`, `uk` or `en`; applied at start |
 | **Overlay and preview** | | | |
 | `overlay` | bool | `true` | show the pill |
 | `overlay_position` | str | `"bottom"` | `bottom` or `top` centre |
@@ -252,7 +290,7 @@ Saving from the Settings dialog rewrites the file atomically.
 
 ## How it works
 
-1. kglobalaccel delivers the press; the controller opens a 16 kHz mono PortAudio stream (100 ms
+1. kglobalaccel delivers the press (hold-to-talk) or the toggle; the controller opens a 16 kHz mono PortAudio stream (100 ms
    chunks). One recognizer per process is loaded at app start and kept warm, so the mic opens
    without waiting for the ~1.6 s model load.
 2. TEN VAD (hop 256 samples = 16 ms) marks speech. A phrase closes after `vad_min_silence` (0.8 s) of
@@ -313,13 +351,15 @@ Three measured facts behind the defaults:
 The log is `~/.local/share/parakeet-dictation/diagnostics.log`, one event per line:
 `ts=... event=<name> key=value ...`. Things to grep for:
 
-- `event=hold_hotkey_conflict owner=<component>`: the key is also bound elsewhere, and kglobalaccel
+- `event=hotkey_conflict action=<push-to-talk|toggle> owner=<component>`: the key is also bound elsewhere, and kglobalaccel
   hands it to whichever component registered first. The app's action is listed in System Settings but
   never fires. A typical owner is a leftover launcher entry such as
   `parakeet-dictation-toggle.desktop` on the same key from an earlier SIGUSR1 setup; remove that
-  binding in System Settings > Shortcuts and restart the app. `event=hold_hotkey_failed` means the
-  registration itself failed (no kglobalaccel, or an unparseable `hotkey_hold`).
-- `event=hold_hotkey_registered ... conflict=none`: the healthy line, once per start.
+  binding in System Settings > Shortcuts and restart the app. `event=hotkey_failed action=...` means the
+  registration itself failed (no kglobalaccel, or an unparseable binding).
+- `event=hold_hotkey_registered action=push-to-talk|toggle ... conflict=none`: the healthy line, one
+  per shortcut at each start. `event=hotkey_changed_in_kde action=...` means you changed a key in
+  System Settings and the app adopted it.
 - `event=paste ... ok=0` followed by `event=paste_failed`: no transport could press the chord.
   `transport=none` means neither a portal session nor `ydotool` was available. Check
   `event=portal_session ready=0 stage=...` (`interface`: no RemoteDesktop v2 portal; `start code=1`:
@@ -346,7 +386,7 @@ The log is `~/.local/share/parakeet-dictation/diagnostics.log`, one event per li
 Why the text is pasted and never typed: on Plasma up to 6.7, Chromium and Electron windows drop
 characters typed through the portal that are not on the active keyboard layout, which is what
 Cyrillic is under a Latin layout; `ydotool type` indexes its ASCII table out of bounds on Cyrillic;
-`wtype` needs the virtual-keyboard protocol (the Settings dialog labels it GNOME/Sway only). The
+`wtype` needs the virtual-keyboard protocol (GNOME/Sway only). The
 clipboard plus a chord pressed as keysyms works in every app regardless of layout.
 
 ## Development

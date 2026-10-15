@@ -74,3 +74,8 @@ came from the system.
   but storing the name is part of the UI rework.
 - The `pkgver=` line in packaging/PKGBUILD names the commit it was last regenerated on; makepkg
   rewrites it on every build, as usual for a -git package.
+
+## Superseded by the redesign
+
+- C4 (pynput crash): pynput was removed entirely; both shortcuts are kglobalaccel actions.
+- The microphone is now stored by name by the new settings window (open point above).

@@ -14,7 +14,9 @@
 # After installing: see the post-install message (parakeet-dictation.install):
 # download a model with `parakeet-dictation-models desktop`, enable the ydotool
 # service, join the uinput group, approve the one-time portal prompt.
-# Autostart is the user's choice:
+# Shortcuts: Insert (hold to talk) and Meta+Insert (start/stop), registered
+# with kglobalaccel at startup; no pynput dependency.
+# Autostart: "Start at login" in Settings > General, or
 #   cp /usr/share/applications/parakeet-dictation.desktop ~/.config/autostart/
 
 pkgname=parakeet-dictation-git
