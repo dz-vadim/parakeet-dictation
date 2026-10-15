@@ -28,29 +28,34 @@ from .config import APP_DIR, MODELS_DIR
 MODELS_JSON = Path(__file__).resolve().parent / "data" / "models.json"
 
 
-def _migrate_legacy_models():
-    """Move models from APP_DIR/models to the XDG data directory if needed."""
+def migrate_legacy_models():
+    """Move model profiles from <checkout>/models to the XDG data directory.
+
+    Only from a source checkout (APP_DIR holds pyproject.toml): installed,
+    APP_DIR is site-packages, and a `models/` there belongs to some other
+    package.  Only directories named after a profile in models.json are
+    moved.  Called by the app at startup — never at import.
+    """
     import shutil
 
+    if not (APP_DIR / "pyproject.toml").exists():
+        return
     legacy = APP_DIR / "models"
     if not legacy.is_dir() or legacy == MODELS_DIR:
         return
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    profile_ids = set(load_model_profiles().get("profiles", {}))
     for item in legacy.iterdir():
+        if item.name not in profile_ids or not item.is_dir():
+            continue
         dest = MODELS_DIR / item.name
         if dest.exists():
             continue
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
         try:
             shutil.move(str(item), str(dest))
         except OSError:
-            # Installed read-only — copy instead
-            if item.is_dir():
-                shutil.copytree(str(item), str(dest))
-            else:
-                shutil.copy2(str(item), str(dest))
-
-
-_migrate_legacy_models()
+            # A read-only checkout: copy instead.
+            shutil.copytree(str(item), str(dest))
 
 
 def load_model_profiles() -> dict:

@@ -15,7 +15,7 @@ from .diagnostics import DIAG
 from .focus import FocusTracker
 from .hotkeys import HotkeyManager
 from .instance import InstanceLock
-from .models import _any_model_downloaded
+from .models import _any_model_downloaded, migrate_legacy_models
 from .ui.overlay import PillOverlay
 from .ui.tray import TrayIcon
 from .ui.windows import MainWindow, WelcomeDialog
@@ -42,6 +42,14 @@ def main():
         who = f" (pid {lock.owner_pid})" if lock.owner_pid else ""
         print(f"{APP_NAME} is already running{who}; this copy is exiting.")
         return 0
+
+    # Models a pre-split checkout kept in <checkout>/models move to the data
+    # dir.  A failure here must not stop the app: the welcome dialog offers
+    # a fresh download instead.
+    try:
+        migrate_legacy_models()
+    except Exception as e:
+        DIAG.log("model_migration_failed", err=type(e).__name__)
 
     DIAG.log("app_start", profile=config.model_profile,
              threads=config.num_threads, typer=config.typer,

@@ -2161,6 +2161,54 @@ def _race_once(da_models, payload, b_fails):
               [p.name for p in Path(tmp).iterdir()] == [dest.name],
               str([p.name for p in Path(tmp).iterdir()]))
 
+
+# ---------------------------------------------------------------------------
+# #32 (E5)  The legacy model migration ran at IMPORT and took APP_DIR to be
+#     the checkout — installed, APP_DIR is site-packages, and its `models/`
+#     is whatever another package put there.  It now runs only from a
+#     checkout, only for profile-id directories, and only when called.
+# ---------------------------------------------------------------------------
+
+def review32_legacy_migration_is_scoped():
+    print("\n[#32 E5] the legacy model migration is checkout-only and profile-only")
+    import re
+    from parakeet_dictation import models as da_models
+    src = (HERE.parent / "parakeet_dictation" / "models.py").read_text()
+    check("nothing migrates at import time",
+          not re.search(r"^_?migrate_legacy_models\(", src, re.M))
+    fn = getattr(da_models, "migrate_legacy_models", None)
+    check("migrate_legacy_models() exists for the app to call", callable(fn))
+    if not callable(fn):
+        return
+    saved = (da_models.APP_DIR, da_models.MODELS_DIR)
+    try:
+        for checkout in (False, True):
+            root = Path(tempfile.mkdtemp(prefix="parakeet-mig-"))
+            app, data = root / "app", root / "data" / "models"
+            (app / "models" / "desktop").mkdir(parents=True)
+            (app / "models" / "desktop" / "tokens.txt").write_text("t")
+            (app / "models" / "unrelated_pkg").mkdir()
+            (app / "models" / "__init__.py").write_text("")
+            if checkout:
+                (app / "pyproject.toml").write_text("[project]\n")
+            da_models.APP_DIR, da_models.MODELS_DIR = app, data
+            fn()
+            moved = sorted(p.name for p in data.iterdir()) if data.exists() else []
+            if checkout:
+                check("from a checkout, a profile directory is moved",
+                      moved == ["desktop"] and (data / "desktop" / "tokens.txt").exists(),
+                      str(moved))
+                check("and nothing else in models/ is touched",
+                      (app / "models" / "unrelated_pkg").is_dir()
+                      and (app / "models" / "__init__.py").exists())
+            else:
+                check("installed (no pyproject.toml), nothing is moved",
+                      moved == [] and (app / "models" / "desktop").is_dir(), str(moved))
+    finally:
+        da_models.APP_DIR, da_models.MODELS_DIR = saved
+    app_src = (HERE.parent / "parakeet_dictation" / "app.py").read_text()
+    check("app.main() runs it at startup", "migrate_legacy_models(" in app_src)
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -2193,7 +2241,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             28: review28_enforce_validates_enums_and_ranges,
             29: review29_config_save_atomic_and_xdg,
             30: review30_model_downloads_pinned_and_verified,
-            31: review31_concurrent_downloads_do_not_collide}
+            31: review31_concurrent_downloads_do_not_collide,
+            32: review32_legacy_migration_is_scoped}
 
 
 def main(argv):
