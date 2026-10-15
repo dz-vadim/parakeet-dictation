@@ -19,7 +19,7 @@ i18n.setup(sys.argv[2] if len(sys.argv) > 2 else "uk")
 from parakeet_dictation.ui.settings import SettingsWindow  # noqa: E402
 
 cfg = AppConfig.load()
-win = SettingsWindow(lambda: cfg, load_model_profiles(), lambda c: "", lambda: None)
+win = SettingsWindow(lambda: cfg, load_model_profiles(), lambda c: (True, ""), lambda: None)
 child = win.get_child()
 win.remove(child)
 off = Gtk.OffscreenWindow()

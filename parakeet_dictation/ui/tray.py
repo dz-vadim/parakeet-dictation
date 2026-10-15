@@ -142,13 +142,17 @@ class TrayIcon:
         self._settings.show_page(page)
         self._settings.present()
 
-    def apply_settings(self, cfg: AppConfig) -> str:
-        """The one place a settings change lands (window, menu, KDE)."""
-        self._controller.apply_config(cfg)
-        problem = self._hotkey_mgr.rebuild(cfg)
+    def apply_settings(self, cfg: AppConfig) -> tuple:
+        """The one place a settings change lands (window, menu, KDE).
+
+        Returns (saved, problem): saved is False when the config file could
+        not be written; problem joins every message for the user."""
+        save_problem = self._controller.apply_config(cfg)
+        hotkey_problem = self._hotkey_mgr.rebuild(cfg)
+        problem = "; ".join(p for p in (save_problem, hotkey_problem) if p)
         self._controller.notify(problem)
         self.update_ui()
-        return problem
+        return (not save_problem, problem)
 
     def on_binding_changed(self, key: str, binding: str):
         new = copy.deepcopy(self._controller.config)

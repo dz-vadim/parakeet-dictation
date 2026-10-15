@@ -433,7 +433,7 @@ def s10_settings_window():
     def on_apply(cfg):
         state["applied"].append(cfg)
         state["cfg"] = cfg
-        return ""
+        return state.get("result", (True, ""))
 
     win = SettingsWindow(lambda: state["cfg"], load_model_profiles(), on_apply, lambda: None)
     for page in ("general", "recognition", "output", "advanced", "about"):
@@ -456,6 +456,20 @@ def s10_settings_window():
     check("Defaults resets the current page only",
           win.draft.get("num_threads") == cfgmod.AppConfig().num_threads
           and win.draft.get("overlay_position") == "bottom")
+    win.destroy()
+    # I2: a failed save keeps the draft (Apply retries it) and shows the message.
+    state["cfg"] = cfgmod.AppConfig()
+    win = SettingsWindow(lambda: state["cfg"], load_model_profiles(), on_apply, lambda: None)
+    state["result"] = (False, "The settings could not be saved to /x/config.json.")
+    win.draft.set("num_threads", 3); win._refresh_buttons()
+    check("I2: apply() is False when the save failed", win.apply() is False)
+    check("I2: the save failure is shown", "could not be saved" in win.info_label.get_text(),
+          win.info_label.get_text())
+    check("I2: the draft is kept, still dirty", win.draft.get("num_threads") == 3
+          and win.draft.dirty and win.apply_button.get_sensitive(), str(win.draft.changed_keys()))
+    state["result"] = (True, "")
+    check("I2: Apply again retries and succeeds", win.apply() and not win.draft.dirty
+          and state["applied"][-1].num_threads == 3)
     win.destroy()
     odd = cfgmod.AppConfig(insert_mode="per_segment", tray_icon_style="parrot", beep_volume=0.3,
                            overlay_position="top", ui_language="uk")
@@ -490,6 +504,15 @@ def s10_settings_window():
         check("apply() is False when Start at login cannot change", win.apply() is False)
         check("its message is shown", "Start at login" in win.info_label.get_text(),
               win.info_label.get_text())
+        # I2: a later problem in the same apply() joins it, never replaces it.
+        win.autostart_wanted = not win._autostart_initial
+        win.draft.set("num_threads", 5)
+        state["result"] = (True, "Insert is already used by kwin")
+        win.apply()
+        text = win.info_label.get_text()
+        check("I2: Start-at-login and shortcut messages both shown",
+              "Start at login" in text and "already used by kwin" in text, text)
+        state["result"] = (True, "")
     finally:
         autostart.set_enabled = saved_set
     win.destroy()
@@ -526,7 +549,7 @@ def s11_tray():
                           toggle=lambda hold_off=True: calls.append(("toggle", hold_off)),
                           pause=lambda: calls.append(("pause",)),
                           set_status_callback=lambda cb: status.append(cb), notify=lambda m: None,
-                          apply_config=lambda c: calls.append(("apply", c)))
+                          apply_config=lambda c: calls.append(("apply", c)) or "")
     mgr = SimpleNamespace(rebuild=lambda c: "")
     try:
         t = traymod.TrayIcon(ctl, mgr)
@@ -539,6 +562,21 @@ def s11_tray():
         t.on_binding_changed("hotkey_toggle", "Meta+Alt+D")
         check("KDE-side change applied to config", calls[-1][0] == "apply"
               and calls[-1][1].hotkey_toggle == "Meta+Alt+D")
+        check("I2: a clean apply_settings is (True, \"\")",
+              t.apply_settings(cfgmod.AppConfig()) == (True, ""))
+        notes = []
+        saved_ns = (ctl.apply_config, mgr.rebuild, ctl.notify)
+        ctl.apply_config = lambda c: "SAVE FAILED"
+        mgr.rebuild = lambda c: "HOTKEY TAKEN"
+        ctl.notify = notes.append
+        try:
+            got = t.apply_settings(cfgmod.AppConfig())
+        finally:
+            ctl.apply_config, mgr.rebuild, ctl.notify = saved_ns
+        check("I2: a failed save is reported with the hotkey problem, not overwritten",
+              got[0] is False and "SAVE FAILED" in got[1] and "HOTKEY TAKEN" in got[1], str(got))
+        check("I2: the notice carries both", notes and "SAVE FAILED" in notes[-1]
+              and "HOTKEY TAKEN" in notes[-1], str(notes))
         # Status text (partials, "Listening...") must not rebuild the menu.
         queries = []
         saved_list = traymod.list_input_devices
@@ -630,11 +668,49 @@ def s12_catalogue_complete():
     check("no obsolete entries left", "\n#~ " not in po)
 
 
+def s13_controller_apply_config():
+    print("\n[13] controller.apply_config: quiet hours follow it; a failed save is reported")
+    import io, tempfile
+    from contextlib import redirect_stderr
+    from parakeet_dictation import audio, config as cfgmod, controller as ctlmod, i18n
+    from parakeet_dictation.diagnostics import DiagnosticLog
+    i18n.setup("en")
+    tmp = tempfile.TemporaryDirectory()
+    saved = (cfgmod.CONFIG_FILE, cfgmod.CONFIG_DIR, ctlmod.DIAG, audio._active_config)
+    cfgmod.CONFIG_DIR = Path(tmp.name)
+    cfgmod.CONFIG_FILE = Path(tmp.name) / "config.json"
+    ctlmod.DIAG = DiagnosticLog(Path(tmp.name) / "diagnostics.log")
+    try:
+        with redirect_stderr(io.StringIO()):
+            ctl = ctlmod.DictationController(cfgmod.AppConfig())
+        ctl.preload = lambda: None
+        audio._active_config = ctl.config
+        new = cfgmod.AppConfig(night_mode=True, night_start="00:00", night_end="23:59")
+        with redirect_stderr(io.StringIO()):
+            result = ctl.apply_config(new)
+        check("I1: beeps read the applied config (quiet hours apply at once)",
+              audio._active_config is new)
+        check("I2: a clean save returns no problem", result == "", repr(result))
+        blocker = Path(tmp.name) / "file"
+        blocker.write_text("")
+        cfgmod.CONFIG_DIR = blocker / "sub"          # mkdir fails: a file is in the way
+        cfgmod.CONFIG_FILE = cfgmod.CONFIG_DIR / "config.json"
+        with redirect_stderr(io.StringIO()):
+            result = ctl.apply_config(cfgmod.AppConfig(num_threads=3))
+        check("I2: a failed save returns a message naming the file",
+              "could not be saved" in str(result) and "config.json" in str(result), repr(result))
+        check("I2: the new settings still apply in memory", ctl.config.num_threads == 3)
+        ctl.shutdown()
+    finally:
+        (cfgmod.CONFIG_FILE, cfgmod.CONFIG_DIR, ctlmod.DIAG, audio._active_config) = saved
+        tmp.cleanup()
+
+
 SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions,
             5: s5_controller_take_kind, 6: s6_menu_model,
             7: s7_settings_draft, 8: s8_autostart, 9: s9_widgets,
             10: s10_settings_window, 11: s11_tray,
-            12: s12_catalogue_complete}
+            12: s12_catalogue_complete, 13: s13_controller_apply_config}
 
 
 def main(argv):

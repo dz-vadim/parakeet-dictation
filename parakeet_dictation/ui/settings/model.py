@@ -45,6 +45,13 @@ class SettingsDraft:
         for key in PAGE_KEYS[page]:
             self.values[key] = copy.deepcopy(getattr(defaults, key))
 
+    def state(self):
+        """Everything restore() needs to undo a commit()."""
+        return copy.deepcopy((self._snapshot, self.values))
+
+    def restore(self, state):
+        self._snapshot, self.values = copy.deepcopy(state)
+
     def commit(self, current: AppConfig) -> AppConfig:
         out = copy.deepcopy(current)
         for key in self.changed_keys():

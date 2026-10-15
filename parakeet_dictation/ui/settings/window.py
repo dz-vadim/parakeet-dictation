@@ -184,6 +184,7 @@ class SettingsWindow(Gtk.Window):
             return False
         self.info.hide()
         ok = True
+        problems = []
         if self.autostart_wanted != self._autostart_initial:
             try:
                 autostart.set_enabled(self.autostart_wanted)
@@ -191,13 +192,22 @@ class SettingsWindow(Gtk.Window):
             except OSError as e:
                 self.autostart_wanted = self._autostart_initial
                 ok = False
-                self._problem(_("Could not change Start at login: {error}").format(error=e.strerror or e))
+                problems.append(_("Could not change Start at login: {error}")
+                                .format(error=e.strerror or e))
         if self.draft.dirty:
+            before = self.draft.state()
             new = self.draft.commit(self._get_config())
-            problem = self._on_apply(new)
-            self.draft.reload(self._get_config())
+            saved, problem = self._on_apply(new)
+            if saved:
+                self.draft.reload(self._get_config())
+            else:
+                # Not written to disk: keep the edits pending so Apply retries.
+                self.draft.restore(before)
+                ok = False
             if problem:
-                self._problem(problem)
+                problems.append(problem)
+        if problems:
+            self._problem("\n".join(problems))
         self.reload_widgets()
         return ok
 

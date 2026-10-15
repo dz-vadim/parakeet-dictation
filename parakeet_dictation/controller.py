@@ -6,6 +6,8 @@ import time
 
 from gi.repository import GLib
 
+from . import audio
+from . import config as config_module
 from . import shortcuts
 from .config import AppConfig
 from .diagnostics import DIAG
@@ -587,7 +589,10 @@ class DictationController:
         elif self._gesture == GESTURE_RECORDING:
             self._overlay_state("listening")
 
-    def apply_config(self, new_config: AppConfig):
+    def apply_config(self, new_config: AppConfig) -> str:
+        """Run with `new_config` from now on and save it.  Returns "" when
+        saved, else a message for the user: the settings still apply, but
+        only until the app quits."""
         if self._engine.is_running or self._gesture != GESTURE_IDLE:
             # Saving settings mid-take cancels it; without ending the take here
             # the gesture would stay "recording" against an engine that no
@@ -603,7 +608,8 @@ class DictationController:
         old_key = self._engine.recognizer_key
         new_config.enforce(DIAG.log)      # before save(): the file never holds it
         self._config = new_config
-        self._config.save(DIAG.log)
+        audio._active_config = new_config     # quiet hours: the beeps read this one
+        saved = self._config.save(DIAG.log)
         self._typer = self._make_typer(new_config)
         DIAG.set_enabled(new_config.diagnostics)
         if self._overlay:
@@ -615,6 +621,10 @@ class DictationController:
             # Otherwise the next take pays the model load while the user is
             # already speaking.
             self.preload()
+        if saved:
+            return ""
+        return _("The settings could not be saved to {path}. They apply until "
+                 "the app quits.").format(path=config_module.CONFIG_FILE)
 
     def _drop_if_idle(self, text: str) -> bool:
         """Text with no take to belong to: a late decode from a session the

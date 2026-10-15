@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: parakeet-dictation\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-16 01:02+0300\n"
+"POT-Creation-Date: 2026-10-16 01:22+0300\n"
 "PO-Revision-Date: 2026-10-16 00:00+0000\n"
 "Last-Translator: Parakeet Dictation\n"
 "Language-Team: Ukrainian\n"
@@ -13,32 +13,40 @@ msgstr ""
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
 "n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
-#: parakeet_dictation/controller.py:41
+#: parakeet_dictation/controller.py:43
 msgid "Model files missing — open Settings › Recognition"
 msgstr "Немає файлів моделі — відкрийте Налаштування › Розпізнавання"
 
-#: parakeet_dictation/controller.py:43
+#: parakeet_dictation/controller.py:45
 msgid "Microphone unavailable — check Settings › General"
 msgstr "Мікрофон недоступний — перевірте Налаштування › Загальні"
 
-#: parakeet_dictation/controller.py:45 parakeet_dictation/ui/overlay.py:975
+#: parakeet_dictation/controller.py:47 parakeet_dictation/ui/overlay.py:975
 msgid "Dictation failed"
 msgstr "Не вдалося виконати диктування"
 
-#: parakeet_dictation/controller.py:364
+#: parakeet_dictation/controller.py:366
 msgid "Nothing to stop — press and hold to dictate"
 msgstr "Нічого зупиняти — утримуйте клавішу для диктування"
 
-#: parakeet_dictation/controller.py:462
+#: parakeet_dictation/controller.py:464
 msgid "Insertion failed — text was not pasted"
 msgstr "Не вдалося вставити текст"
 
-#: parakeet_dictation/controller.py:694
+#: parakeet_dictation/controller.py:626
+#, python-brace-format
+msgid ""
+"The settings could not be saved to {path}. They apply until the app quits."
+msgstr ""
+"Не вдалося зберегти налаштування у {path}. Вони діятимуть, доки програму не "
+"закрито."
+
+#: parakeet_dictation/controller.py:704
 #, python-brace-format
 msgid "Error: {message}"
 msgstr "Помилка: {message}"
 
-#: parakeet_dictation/controller.py:715
+#: parakeet_dictation/controller.py:725
 #, python-brace-format
 msgid "{message} — text is on the clipboard"
 msgstr "{message} — текст у буфері обміну"
@@ -504,7 +512,7 @@ msgstr ""
 "{key} уже використовується для «Утримувати, щоб говорити» — виберіть іншу "
 "комбінацію клавіш для «Почати / зупинити»."
 
-#: parakeet_dictation/ui/settings/window.py:194
+#: parakeet_dictation/ui/settings/window.py:195
 #, python-brace-format
 msgid "Could not change Start at login: {error}"
 msgstr "Не вдалося змінити запуск під час входу в систему: {error}"
