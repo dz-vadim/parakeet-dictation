@@ -1940,6 +1940,86 @@ def review28_enforce_validates_enums_and_ranges():
         forced = good.enforce()
     check("valid values, edges included, are left alone", forced == [], str(forced))
 
+
+# ---------------------------------------------------------------------------
+# #29 (F1, F2)  save() is atomic and never raises; the config directory
+#     follows XDG_CONFIG_HOME.
+# ---------------------------------------------------------------------------
+
+def review29_config_save_atomic_and_xdg():
+    print("\n[#29 F1 F2] config save is atomic and reported; XDG_CONFIG_HOME is honoured")
+    import json
+    import os
+    import subprocess
+    saved = (da_config.CONFIG_DIR, da_config.CONFIG_FILE)
+    d = Path(tempfile.mkdtemp(prefix="parakeet-save-"))
+    da_config.CONFIG_DIR, da_config.CONFIG_FILE = d, d / "config.json"
+    try:
+        da_config.AppConfig(num_threads=2).save()
+        good = da_config.CONFIG_FILE.read_text()
+        check("a normal save writes the file", json.loads(good)["num_threads"] == 2)
+        check("and leaves no temp file behind",
+              sorted(p.name for p in d.iterdir()) == ["config.json"],
+              str(sorted(p.name for p in d.iterdir())))
+
+        real_fsync = os.fsync
+
+        def failing_fsync(_fd):
+            raise OSError(28, "No space left on device")
+
+        os.fsync = failing_fsync
+        seen = []
+        err = io.StringIO()
+        try:
+            with redirect_stderr(err):
+                ok = da_config.AppConfig(num_threads=3).save(
+                    log=lambda ev, **kw: seen.append((ev, kw)))
+            raised = None
+        except Exception as e:          # noqa: BLE001
+            raised, ok = e, None
+        finally:
+            os.fsync = real_fsync
+        check("a failing write does not raise", raised is None, repr(raised))
+        check("save() says it failed", ok is False, repr(ok))
+        check("the failure is reported (log and stderr)",
+              any(ev == "config_error" and kw.get("reason") == "save_failed"
+                  for ev, kw in seen) and "save_failed" in err.getvalue(), str(seen))
+        check("the previous file is untouched (no half-written config)",
+              da_config.CONFIG_FILE.read_text() == good)
+        check("and no temp file is left behind",
+              sorted(p.name for p in d.iterdir()) == ["config.json"],
+              str(sorted(p.name for p in d.iterdir())))
+
+        blocker = d / "not-a-dir"
+        blocker.write_text("")
+        da_config.CONFIG_DIR, da_config.CONFIG_FILE = blocker, blocker / "config.json"
+        with redirect_stderr(io.StringIO()):
+            try:
+                ok = da_config.AppConfig().save()
+                raised = None
+            except Exception as e:      # noqa: BLE001
+                raised = e
+        check("an uncreatable config dir is reported, not raised",
+              raised is None and ok is False, repr(raised))
+    finally:
+        da_config.CONFIG_DIR, da_config.CONFIG_FILE = saved
+
+    xdg = Path(tempfile.mkdtemp(prefix="parakeet-xdg-"))
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "from parakeet_dictation import config as c; print(c.CONFIG_DIR)"],
+        cwd=str(HERE.parent), capture_output=True, text=True,
+        env={**os.environ, "XDG_CONFIG_HOME": str(xdg)}).stdout.strip()
+    check("CONFIG_DIR is $XDG_CONFIG_HOME/parakeet-dictation",
+          out == str(xdg / "parakeet-dictation"), out)
+    out = subprocess.run(
+        [sys.executable, "-c",
+         "from parakeet_dictation import config as c; print(c.CONFIG_DIR)"],
+        cwd=str(HERE.parent), capture_output=True, text=True,
+        env={**os.environ, "XDG_CONFIG_HOME": ""}).stdout.strip()
+    check("an empty XDG_CONFIG_HOME falls back to ~/.config",
+          out == str(Path.home() / ".config" / "parakeet-dictation"), out)
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1969,7 +2049,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             25: review25_mic_error_keeps_captured_speech,
             26: review26_audio_device_by_name,
             27: review27_int16_clip_and_beep_errors,
-            28: review28_enforce_validates_enums_and_ranges}
+            28: review28_enforce_validates_enums_and_ranges,
+            29: review29_config_save_atomic_and_xdg}
 
 
 def main(argv):

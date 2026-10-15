@@ -13,10 +13,19 @@ from pathlib import Path
 
 APP_NAME = "Parakeet Dictation"
 APP_ID = "parakeet-dictation"
-CONFIG_DIR = Path.home() / ".config" / APP_ID
+
+
+def _xdg_dir(var: str, fallback: Path) -> Path:
+    """$var if it is set to an absolute path (the XDG spec ignores anything
+    else), `fallback` otherwise."""
+    value = os.environ.get(var, "")
+    return Path(value) if value and os.path.isabs(value) else fallback
+
+
+CONFIG_DIR = _xdg_dir("XDG_CONFIG_HOME", Path.home() / ".config") / APP_ID
 CONFIG_FILE = CONFIG_DIR / "config.json"
 APP_DIR = Path(__file__).resolve().parent.parent   # the checkout root, as before the split
-DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / APP_ID
+DATA_DIR = _xdg_dir("XDG_DATA_HOME", Path.home() / ".local" / "share") / APP_ID
 MODELS_DIR = DATA_DIR / "models"
 
 # Window classes (KWin resourceClass) that need Ctrl+Shift+V: Ctrl+V is
@@ -194,9 +203,38 @@ class AppConfig:
     preview_interval_s: float = 1.0
     preview_window_s: float = 15.0
 
-    def save(self):
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        CONFIG_FILE.write_text(json.dumps(asdict(self), indent=2))
+    def save(self, log=None) -> bool:
+        """Write CONFIG_FILE atomically.  Never raises; returns success.
+
+        A temp file in the same directory, fsync'd and renamed over the old
+        one: a crash or a full disk mid-write used to leave a truncated
+        config.json, which the next load() could only move aside.  A
+        failure is reported like load() reports (stderr, plus `log`).
+        """
+        tmp = None
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            data = json.dumps(asdict(self), indent=2).encode("utf-8")
+            tmp = CONFIG_FILE.with_name(f".{CONFIG_FILE.name}.{os.getpid()}.tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, data)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(tmp, CONFIG_FILE)
+            tmp = None
+            return True
+        except (OSError, TypeError, ValueError) as e:
+            _reporter(log)("config_error", reason="save_failed", err=type(e).__name__,
+                           errno=getattr(e, "errno", 0) or 0, path=CONFIG_FILE.name)
+            return False
+        finally:
+            if tmp is not None:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
 
     def enforce(self, log=None) -> list:
         """Apply the invariants a config must satisfy to run; returns the keys

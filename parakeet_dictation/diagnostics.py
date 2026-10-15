@@ -9,7 +9,9 @@ from pathlib import Path
 # (config and diagnostics import nothing from it), so the data directory is
 # spelled out the same way config.py spells it.
 APP_ID = "parakeet-dictation"
-DATA_DIR = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / APP_ID
+_DATA_HOME = os.environ.get("XDG_DATA_HOME", "")
+DATA_DIR = (Path(_DATA_HOME) if os.path.isabs(_DATA_HOME)
+            else Path.home() / ".local" / "share") / APP_ID
 DIAG_LOG_FILE = DATA_DIR / "diagnostics.log"
 DIAG_LOG_MAX_BYTES = 5 * 1024 * 1024
 

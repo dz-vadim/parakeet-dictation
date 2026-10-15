@@ -602,7 +602,7 @@ class DictationController:
         old_key = self._engine.recognizer_key
         new_config.enforce(DIAG.log)      # before save(): the file never holds it
         self._config = new_config
-        self._config.save()
+        self._config.save(DIAG.log)
         self._typer = self._make_typer(new_config)
         DIAG.set_enabled(new_config.diagnostics)
         if self._overlay:
