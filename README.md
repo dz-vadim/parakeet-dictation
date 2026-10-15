@@ -42,12 +42,39 @@ What it is not:
 - The venv is built with **Python 3.12**, which is what this setup was verified with. sherpa-onnx 1.13.8
   now also publishes `cp314` wheels and ten-vad is pure Python, so a 3.14 venv may work but is untested
   here. `uv venv --python 3.12` downloads 3.12 itself.
-- Python packages (`requirements.txt`): `sherpa-onnx>=1.12`, `sounddevice>=0.4`, `pynput>=1.7`,
-  `numpy`, `PyGObject`, `ten-vad>=1.0.6`. The model-download CLI additionally needs `requests` and `tqdm`.
+- Python packages (`requirements.txt`, the same list as `pyproject.toml`): `sherpa-onnx>=1.12`,
+  `sounddevice>=0.4`, `pynput>=1.7`, `numpy`, `PyGObject`, `pycairo`, `ten-vad>=1.0.6`, `requests`
+  (model downloads) and `tqdm` (the download CLI's progress bar).
 - About 2 GB of RAM for the desktop model while it is loaded; 639 MB of disk for its files.
 - Ubuntu and other distributions: untested since the fork.
 
 ## Install
+
+### Arch Linux (AUR)
+
+The package is `parakeet-dictation-git`; its TEN VAD dependency is `python-ten-vad-bin`. Both
+PKGBUILDs live in this repository (`packaging/` and `packaging/deps/python-ten-vad-bin/`), and
+the other dependencies (`python-sherpa-onnx`, `python-sounddevice`, `python-pynput`) are on the AUR.
+
+```sh
+yay -S parakeet-dictation-git                  # once it is published on the AUR
+# until then, from a checkout:
+(cd packaging/deps/python-ten-vad-bin && makepkg -si)
+(cd packaging && makepkg -si)
+
+parakeet-dictation-models desktop              # 639 MB, into ~/.local/share/parakeet-dictation/models/
+systemctl --user enable --now ydotool          # fallback chord transport
+```
+
+- ydotool needs write access to `/dev/uinput`: add yourself to the group that owns it
+  (`ls -l /dev/uinput`; the stock `80-uinput.rules` uses `input`) and log out and back in.
+- The first start asks once, through xdg-desktop-portal, whether the app may "Remote Control" the
+  session. Approve it; the grant is kept as a restore token and not asked for again.
+- Then start "Parakeet Dictation" from the menu (or `parakeet-dictation`), hold Meta+Z, speak,
+  release. For autostart copy `/usr/share/applications/parakeet-dictation.desktop` to
+  `~/.config/autostart/`.
+
+### From a checkout
 
 ```sh
 git clone https://github.com/dz-vadim/parakeet-dictation.git
@@ -55,14 +82,15 @@ cd parakeet-dictation
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 uv pip install --python .venv/bin/python -e .
-uv pip install --python .venv/bin/python requests tqdm      # download CLI only
 .venv/bin/python -m parakeet_dictation.models desktop        # 639 MB
 ```
 
 Profiles for the downloader: `desktop` (Parakeet TDT 0.6B v3 int8, 639 MB), `laptop` (Canary 180M
 Flash int8, 198 MB), `streaming` (Nemotron Streaming 0.6B int8, 631 MB), `all`. Files go to
-`~/.local/share/parakeet-dictation/models/<profile>/` (`$XDG_DATA_HOME` is honoured). If no model is
-present at start, a welcome dialog offers to download one from inside the app.
+`~/.local/share/parakeet-dictation/models/<profile>/` (`$XDG_DATA_HOME` is honoured). Every URL is
+pinned to a Hugging Face commit and every file is checked against the sha256 in
+`parakeet_dictation/data/models.json` before it is put in place. If no model is present at start, a
+welcome dialog offers to download one from inside the app.
 
 Run with `./start.sh` (uses `.venv`), `.venv/bin/parakeet-dictation`, or
 `.venv/bin/python -m parakeet_dictation`. The first start on a desktop asks once, via the portal,
@@ -114,7 +142,7 @@ their place):
 | paused | amber dot, dim meter | paused with SIGUSR2 / tray |
 | processing | red dot, spinner, clock frozen | key released, decoder draining |
 | success | green tick, final time | text was pasted; hides after 0.5 s |
-| error | wider rounded rectangle with a message | hides after 3 s; the message is also on stderr |
+| error | wider rounded rectangle with a message | sized to the message (two lines at most); hides after 3-8 s depending on its length; the message is also on stderr |
 
 The pill refuses to show *listening* unless the engine really has a capture stream open, and a
 watchdog hides it if capture stops. The preview panel above it holds the phrases already decoded
@@ -169,8 +197,10 @@ line), Start/Stop Dictation, Pause, a status line, Model (switch between downloa
 
 ## Configuration
 
-`~/.config/parakeet-dictation/config.json`; missing keys take the defaults below, unknown keys are
-ignored. Saving from the Settings dialog rewrites the file.
+`~/.config/parakeet-dictation/config.json` (`$XDG_CONFIG_HOME` is honoured); missing keys take the
+defaults below, unknown keys are ignored, and a value of the wrong type, outside its range or not one
+of the listed choices is replaced by its default (logged as `config_error` / `config_forced`).
+Saving from the Settings dialog rewrites the file atomically.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -185,7 +215,7 @@ ignored. Saving from the Settings dialog rewrites the file.
 | `normalize` | bool | `true` | boost quiet blocks for the model only (never attenuates, never above +20 dB) |
 | `normalize_target_dbfs` | float | `-18.0` | RMS level a block is lifted towards |
 | **Audio** | | | |
-| `audio_device` | str | `""` | input device name substring or index; empty = system default |
+| `audio_device` | str | `""` | input device name (exact, else substring); a bare number is an index for older configs; no match = system default, logged as `device_missing` |
 | `beep_volume` | float | `0.5` | start/stop/pause tone volume |
 | `night_mode` | bool | `true` | suppress beeps between the hours below |
 | `night_start` | int | `22` | hour beeps go quiet |
@@ -207,17 +237,19 @@ ignored. Saving from the Settings dialog rewrites the file.
 | `no_ctrl_v_classes` | list | `["emacs", "Emacs"]` | classes that get Shift+Insert |
 | `paste_overrides` | dict | `{}` | `{window class: chord}`, wins over the tables |
 | `keep_on_clipboard` | bool | `false` | leave the dictated text on the clipboard instead of restoring the previous contents |
+| `paste_min_delay_ms` | int | `350` | the chord waits this long after the hotkey release (or any stop), because the shortcut's modifier is usually still held; `0` disables |
 | `focus_script` | bool | `true` | load the KWin focus script; off, the target is always unknown |
 | `filter_fillers` | bool | `true` | drop `um`, `uh`, `ehm`, `hmm`, `er`, `ah`, `erm`, `hm` |
 | `partial_overwrite` | bool | `true` | streaming profile only: type partials and retype on revision (ignored in `end_of_take`) |
 | **Overlay and preview** | | | |
 | `overlay` | bool | `true` | show the pill |
 | `overlay_position` | str | `"bottom"` | `bottom` or `top` centre |
+| `tray_icon_style` | str | `"mic"` | tray icon set: `mic`, `parrot` or `wave` |
 | `preview` | bool | `true` | show the transcript panel above the pill |
 | `preview_interval_s` | float | `1.0` | seconds between hypothesis passes over the open phrase; `0` disables the pass |
 | `preview_window_s` | float | `15.0` | at most this much of the open phrase is re-decoded per pass |
 | **Diagnostics** | | | |
-| `diagnostics` | bool | `true` | write `~/.local/share/parakeet-dictation/diagnostics.log` |
+| `diagnostics` | bool | `true` | write `~/.local/share/parakeet-dictation/diagnostics.log` (see Privacy) |
 
 ## How it works
 
@@ -260,6 +292,22 @@ Three measured facts behind the defaults:
   about 3 cores and the final decode is 148 ms
   ([docs/measurements/2026-09-30-preview-cost.md](docs/measurements/2026-09-30-preview-cost.md)).
   2 threads is the battery option.
+
+## Privacy
+
+- Speech never leaves the machine: capture, voice activity detection and recognition run locally.
+  The only network access is the model download from huggingface.co (on request, from the welcome
+  dialog, Settings or `parakeet-dictation-models`), pinned to a fixed commit and sha256-verified.
+- Dictated text goes to `wl-copy` on stdin, never on a command line (which any local user can read
+  in `/proc`), and the previous clipboard is put back 0.5 s after the paste (also on quit, SIGINT
+  and SIGTERM) unless `keep_on_clipboard` is set.
+- The diagnostics log (`~/.local/share/parakeet-dictation/diagnostics.log`, mode 0600, 5 MB cap)
+  holds timings, sizes and counts, and the window class (`kitty`, `org.kde.kwrite`, ...) a take was
+  pasted into. It never holds transcript text, audio, window titles or device names, and window
+  switches are not logged. Set `"diagnostics": false` in the config to turn it off, and delete the
+  file to clear it.
+- The portal restore token (`~/.config/parakeet-dictation/portal-restore-token`) is a standing grant
+  to press keys in the session; it is written 0600. Delete it to make the app ask again.
 
 ## Troubleshooting
 
@@ -309,9 +357,11 @@ Tests (each prints one `[PASS]`/`[FAIL]` line per check and exits non-zero on fa
 | Suite | Checks | Needs |
 |---|---|---|
 | `.venv/bin/python tests/ptt_state.py` | 43 | nothing (stub engine); covers the push-to-talk state machine |
+| `.venv/bin/python tests/test_defects.py` | 124 | nothing (no model); the package-split defect list, one section per defect |
+| `.venv/bin/python tests/test_review.py` | 248 | a display for one section; the 2026-09-30 and 2026-10-15 reviews, one section per finding |
 | `.venv/bin/python tests/overlay_safety.py` | 22 | a display; pill refusal gate, watchdog, stale meter, preview panel |
 | `.venv/bin/python tests/test_pipeline.py` | 23 | the desktop model, `bench/segs/*.wav` (4 or more), `bench/real_uk_norm.wav` |
-| `.venv/bin/python tests/test_hold_take.py` | 204 | the desktop model, `bench/staging/s90.wav`, `bench/segs/00.wav`, `bench/segs/01.wav`; real-time fake microphone, takes a few minutes |
+| `.venv/bin/python tests/test_hold_take.py` | 210 | the desktop model, `bench/staging/s90.wav`, `bench/segs/00.wav`, `bench/segs/01.wav`; real-time fake microphone, takes a few minutes |
 
 The two model suites drive the real engine, VAD, coalescer, controller and `TextTyper`; only the
 microphone and the external binaries (`wl-copy`, `wl-paste`, `ydotool`) are replaced. The fixture
@@ -334,8 +384,18 @@ controller; `app.py` is wiring only. `parakeet_dictation/data/focus.js` is the K
 
 ## Credits and licence
 
-Upstream: [Daniel Rosehill, Parakeet-Type-Ubuntu](https://github.com/danielrosehill/Parakeet-Type-Ubuntu),
-whose README states the MIT licence; this tree carries no LICENSE file of its own. This fork narrows
-the scope to KDE Plasma Wayland push-to-talk with Ukrainian and English dictation; the pipeline,
-insertion path, overlay and tests in this repository were measured and verified on one user's voice
-and desktop. Models: NVIDIA Parakeet TDT 0.6B v3 via the sherpa-onnx int8 export; TEN VAD.
+Upstream: [Daniel Rosehill, Parakeet-Type-Ubuntu](https://github.com/danielrosehill/Parakeet-Type-Ubuntu).
+This fork narrows the scope to KDE Plasma Wayland push-to-talk with Ukrainian and English dictation;
+the pipeline, insertion path, overlay and tests in this repository were measured and verified on one
+user's voice and desktop.
+
+Licence: MIT, see [LICENSE](LICENSE) (Copyright Daniel Rosehill, Vadym Dziuba).
+
+Third-party components, not part of this repository's licence:
+
+- [TEN VAD](https://github.com/TEN-framework/ten-vad), installed as the `ten-vad` Python package:
+  Apache-2.0 with additional conditions from its authors (see the LICENSE and NOTICES it ships).
+- NVIDIA Parakeet TDT 0.6B v3, used through the sherpa-onnx int8 export: CC-BY-4.0. It is not
+  bundled; the app downloads it at runtime from Hugging Face. The `laptop` and `streaming` profiles
+  (Canary 180M Flash, Nemotron Streaming 0.6B) are downloaded the same way under their own model
+  licences.
