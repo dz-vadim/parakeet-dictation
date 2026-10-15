@@ -857,11 +857,13 @@ def defect9_thread_default():
 
 
 # ---------------------------------------------------------------------------
-# #10 focus.py logs the window class when it changes, not on every activation.
+# #10 focus.py logged the window class on every activation; then (this
+#     defect) only on a class change; since the 2026-10-15 review (C8) not at
+#     all — the class is recorded only on a take's paste / insert line.
 # ---------------------------------------------------------------------------
 
 def defect10_focus_log_on_change():
-    print("\n[#10] focus logged on class change only")
+    print("\n[#10] window switches are tracked, not logged")
     from gi.repository import GLib
     from parakeet_dictation import focus as da_focus
     da_focus.DIAG = TEST_DIAG
@@ -885,16 +887,13 @@ def defect10_focus_log_on_change():
     activate("kitty")
     activate("")                      # desktop / no window
     activate("")
-    logged = [l.split("cls=")[1].split()[0]
-              for l in diag_lines()[before:] if "event=focus " in l]
-    check("one focus line per class change",
-          logged == ["kitty", "org.kde.kwrite", "kitty", "unknown"], str(logged))
+    logged = [l for l in diag_lines()[before:] if "event=focus " in l]
+    check("no focus line for any activation", logged == [], str(logged))
     check("the cached snapshot still follows every activation",
           tracker._latest is not None and tracker._latest.resource_class == "")
     activate("kitty", "z")
-    check("a caption change on the same class is tracked but not logged",
-          tracker._latest.caption == "z"
-          and sum(1 for l in diag_lines()[before:] if "event=focus " in l) == 5)
+    check("a caption change is tracked too",
+          tracker._latest.caption == "z" and tracker._latest.resource_class == "kitty")
 
 
 # ---------------------------------------------------------------------------

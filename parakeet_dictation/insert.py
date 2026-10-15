@@ -237,11 +237,20 @@ class PortalKeyboard:
 
     @classmethod
     def save_token(cls, token: str):
+        # Written to a 0600 temp file and renamed over the old one: the token
+        # is a standing grant to inject keys, so it is never world-readable,
+        # not even for the moment between a write and a chmod.
         try:
             path = cls._token_path()
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(token, encoding="utf-8")
-            path.chmod(0o600)
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.fchmod(fd, 0o600)          # O_CREAT's mode ignores an existing file
+                os.write(fd, token.encode("utf-8"))
+            finally:
+                os.close(fd)
+            os.replace(tmp, path)
         except OSError:
             pass
 
@@ -473,6 +482,10 @@ def _run_quiet(args, timeout=5, input=None):
                           stderr=subprocess.DEVNULL, close_fds=True)
 
 
+def _to_bytes(text: str) -> bytes:
+    return text.encode("utf-8", "replace")
+
+
 # What to install when a helper is missing, by executable name.
 _HELPER_PACKAGE = {
     "wl-copy": "wl-clipboard", "wl-paste": "wl-clipboard",
@@ -608,7 +621,9 @@ class TextTyper:
         """Type a string into the active window (no newline safety)."""
         try:
             if self._method == "wtype":
-                subprocess.run(["wtype", "--", text], timeout=5)
+                # `-` = read the text from stdin: an argv is world-readable
+                # in /proc/<pid>/cmdline for as long as the helper runs.
+                subprocess.run(["wtype", "-"], input=_to_bytes(text), timeout=5)
             else:
                 self._clipboard_paste(text, target)
         except FileNotFoundError as e:
@@ -654,7 +669,10 @@ class TextTyper:
             try:
                 for flag in ([], ["--primary"]):
                     staged += 1        # a wl-copy that times out may own it
-                    _run_quiet(["wl-copy", *flag, "--", text])
+                    # On stdin, never in argv: any local user can read a
+                    # process's argv from /proc, and wl-copy stays resident
+                    # for as long as it owns the selection.
+                    _run_quiet(["wl-copy", *flag], input=_to_bytes(text))
             except (OSError, subprocess.TimeoutExpired) as e:
                 timed_out = isinstance(e, subprocess.TimeoutExpired)
                 if timed_out or staged > 1:

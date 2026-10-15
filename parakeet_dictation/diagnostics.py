@@ -32,6 +32,7 @@ class DiagnosticLog:
         self._max_bytes = max_bytes
         self._lock = threading.Lock()
         self._enabled = True
+        self._private = False
 
     def set_enabled(self, enabled: bool):
         self._enabled = bool(enabled)
@@ -50,8 +51,15 @@ class DiagnosticLog:
         line = " ".join(parts) + "\n"
         try:
             with self._lock:
-                self._path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self._path, "a", encoding="utf-8") as fh:
+                # Private from the first byte: the log records when the user
+                # dictated and into which app.  0700 / 0600 at creation,
+                # whatever the umask; an existing file is tightened once.
+                self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                fd = os.open(self._path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+                with os.fdopen(fd, "a", encoding="utf-8") as fh:
+                    if not self._private:
+                        os.fchmod(fd, 0o600)
+                        self._private = True
                     fh.write(line)
                 if self._path.stat().st_size > self._max_bytes:
                     self._trim()
@@ -68,7 +76,10 @@ class DiagnosticLog:
         if nl != -1:
             data = data[nl + 1:]  # drop the partial line the seek landed in
         tmp = self._path.with_name(self._path.name + ".tmp")
-        tmp.write_bytes(data)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            os.fchmod(fd, 0o600)
+            fh.write(data)
         tmp.replace(self._path)
 
 

@@ -66,7 +66,6 @@ class FocusTracker:
         self._loading = False          # a _load chain is in flight
         self._lock = threading.Lock()
         self._latest = None
-        self._last_logged_cls = None   # so alt-tabbing does not flood the log
 
     # -- D-Bus plumbing -----------------------------------------------------
 
@@ -82,13 +81,9 @@ class FocusTracker:
             pid = -1
         with self._lock:
             self._latest = FocusSnapshot(rc, rn, cap, pid, time.monotonic())
-            changed = rc != self._last_logged_cls
-            self._last_logged_cls = rc
-        # The class only, and only when it changes: captions carry document
-        # titles and chat names, and every activation is a line too many —
-        # alt-tabbing between two windows of one app said nothing new.
-        if changed:
-            DIAG.log("focus", cls=rc or "unknown")
+        # Nothing is logged here: a line per window switch is a trail of
+        # which apps the user went through all day.  The class is recorded
+        # only where it matters — the paste / insert line of a take.
         invocation.return_value(None)
 
     def _export(self) -> bool:
@@ -201,7 +196,6 @@ class FocusTracker:
         self._loaded = False
         with self._lock:
             self._latest = None
-            self._last_logged_cls = None
 
     # -- public API ---------------------------------------------------------
 

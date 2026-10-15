@@ -1038,6 +1038,10 @@ def review14_insertion_off_thread_and_batched_backspaces():
 
     def run(args, **_kw):
         args = list(args)
+        if args[0] == "wl-copy" and _kw.get("input") is not None:
+            # Staged text arrives on stdin (C8); keep it as the last element
+            # so the checks below read it like the argv it used to be.
+            args = args + ["--", _kw["input"].decode()]
         calls.append(args)
         if args[0] == "ydotool" or (args[0] == "wl-copy" and "--" in args):
             threads.add(threading.get_ident())
@@ -1548,6 +1552,117 @@ def review22_shutdown_flushes_clipboard_restore():
     check("app.py handles SIGTERM on the main loop",
           "signal.SIGTERM" in src and "unix_signal_add" in src)
 
+
+# ---------------------------------------------------------------------------
+# #23 (C8)  Privacy: dictated text never sits in a process argv (any user can
+#     read /proc/*/cmdline), the restore token is never world-readable, the
+#     log does not record every window switch, and the log is 0600 in 0700.
+# ---------------------------------------------------------------------------
+
+def review23_privacy():
+    print("\n[#23 C8] no text in argv, private token and log, no focus trail")
+    import os
+    import stat
+    secret = "my secret dictation"
+    world = ClipboardWorld()
+    undo = world.install()
+    try:
+        typer = da_insert.TextTyper("clipboard")
+        typer.type_text(secret)
+        typer.wait_idle()
+        typer.flush_restore()
+        in_argv = [a for a in world.argv if any(secret in str(x) for x in a)]
+        check("clipboard: the text is in no helper's argv", in_argv == [], str(in_argv))
+        check("it reaches wl-copy on stdin, on both selections",
+              world.inputs.count((secret + " ").encode()) == 2, str(world.inputs))
+        check("and the paste carried it", world.pastes == [(secret + " ").encode()],
+              str(world.pastes))
+
+        world.argv.clear()
+        seen = []
+        real_run = world.run
+
+        def run(args, **kw):
+            if args[0] == "wtype":
+                seen.append((list(args), kw.get("input")))
+            return real_run(args, **kw)
+
+        da_insert.subprocess.run = run
+        typer = da_insert.TextTyper("wtype")
+        typer.type_text(secret)
+        typer.wait_idle()
+        check("wtype: the text is in no argv",
+              seen and all(secret not in " ".join(a) for a, _i in seen), str(seen))
+        check("wtype reads it from stdin (`wtype -`)",
+              seen and seen[0][0] == ["wtype", "-"]
+              and seen[0][1] == (secret + " ").encode(), str(seen))
+    finally:
+        undo()
+
+    token = da_insert.PortalKeyboard._token_path()
+    token.unlink(missing_ok=True)
+    opened = []
+    real_open = os.open
+
+    def spy_open(path, flags, mode=0o777, *a, **k):
+        if str(path).startswith(str(token)):
+            opened.append(mode)
+        return real_open(path, flags, mode, *a, **k)
+
+    os.open = spy_open
+    try:
+        da_insert.PortalKeyboard.save_token("tok-1")
+    finally:
+        os.open = real_open
+    check("the restore token is created 0600 from the start (never 0644)",
+          opened and all(m == 0o600 for m in opened), str([oct(m) for m in opened]))
+    check("and is 0600 on disk", stat.S_IMODE(token.stat().st_mode) == 0o600,
+          oct(stat.S_IMODE(token.stat().st_mode)))
+    token.chmod(0o644)
+    da_insert.PortalKeyboard.save_token("tok-2")
+    check("rewriting a pre-existing 0644 token leaves it 0600",
+          stat.S_IMODE(token.stat().st_mode) == 0o600
+          and da_insert.PortalKeyboard.load_token() == "tok-2")
+    token.unlink(missing_ok=True)
+
+    from parakeet_dictation import focus as da_focus
+    da_focus.DIAG = TEST_DIAG
+    tracker = da_focus.FocusTracker(enabled=False)
+
+    class Invocation:
+        def return_value(self, _v):
+            pass
+
+    before = len(diag_lines())
+    for cls in ("kitty", "org.kde.kwrite", "org.telegram.desktop"):
+        tracker._on_report(None, None, None, None, None,
+                           GLib.Variant("(ssss)", (cls, cls, "caption", "1")), Invocation())
+    check("window switches are not logged",
+          not events(diag_lines()[before:], "focus"), str(diag_lines()[before:]))
+    check("the snapshot still follows them",
+          tracker.snapshot() is None or tracker._latest.resource_class == "org.telegram.desktop")
+
+    d = Path(tempfile.mkdtemp(prefix="parakeet-diag-")) / "sub"
+    log = da_diagnostics.DiagnosticLog(d / "diagnostics.log")
+    old_umask = os.umask(0o022)
+    try:
+        log.log("probe", n=1)
+    finally:
+        os.umask(old_umask)
+    check("the diagnostics dir is created 0700",
+          d.is_dir() and stat.S_IMODE(d.stat().st_mode) == 0o700,
+          oct(stat.S_IMODE(d.stat().st_mode)) if d.exists() else "missing")
+    f = d / "diagnostics.log"
+    check("the diagnostics log is created 0600",
+          f.exists() and stat.S_IMODE(f.stat().st_mode) == 0o600,
+          oct(stat.S_IMODE(f.stat().st_mode)) if f.exists() else "missing")
+    small = da_diagnostics.DiagnosticLog(d / "small.log", max_bytes=200)
+    for i in range(20):
+        small.log("probe", n=i)
+    f2 = d / "small.log"
+    check("and stays 0600 after a trim rewrites it",
+          stat.S_IMODE(f2.stat().st_mode) == 0o600, oct(stat.S_IMODE(f2.stat().st_mode)))
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1571,7 +1686,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             19: review19_bad_pynput_binding,
             20: review20_stop_honours_paste_min_delay,
             21: review21_kglobalaccel_restart_reregisters,
-            22: review22_shutdown_flushes_clipboard_restore}
+            22: review22_shutdown_flushes_clipboard_restore,
+            23: review23_privacy}
 
 
 def main(argv):
