@@ -408,7 +408,11 @@ class ASREngine:
         stats = {"segments": 0, "too_short": 0, "overflow": 0,
                  "queue_full": 0, "decode_ms": 0.0, "flushed": 0,
                  "preview_passes": 0, "preview_skipped": 0, "preview_ms": 0.0,
-                 "captured": 0}       # samples fed to the VAD — the preview's clock
+                 "captured": 0,       # samples fed to the VAD — the preview's clock
+                 # Numbers only, for bench/take_report.py: when the VAD first
+                 # heard speech (ms of capture) and the level of the first
+                 # block, which shows the microphone's power-up transient.
+                 "first_speech_ms": -1, "head_db": None}
         worker = threading.Thread(target=self._decode_worker,
                                   args=(pending, stats), daemon=True)
         worker.start()
@@ -492,11 +496,17 @@ class ASREngine:
                             last_overflow_log = now
                             DIAG.log("audio_overflow", count=stats["overflow"])
                     samples = audio.reshape(-1)
+                    if stats["head_db"] is None:
+                        stats["head_db"] = round(20 * math.log10(
+                            max(float(np.sqrt(np.mean(np.square(samples)))), 1e-9)), 1)
                     with live_lock:
                         vad.accept_waveform(samples)
                         speech = vad.is_speech_detected()
                         stats["captured"] += len(samples)
                     self._publish_level(audio, speech)
+                    if speech and stats["first_speech_ms"] < 0:
+                        stats["first_speech_ms"] = round(
+                            stats["captured"] / SAMPLE_RATE * 1000)
                     if speech and not was_speech:
                         # On the edge only: the same caption ten times a
                         # second is ten idle callbacks the loop has to run.
@@ -557,7 +567,9 @@ class ASREngine:
                      decode_ms=stats["decode_ms"],
                      preview_passes=stats["preview_passes"],
                      preview_skipped=stats["preview_skipped"],
-                     preview_ms=stats["preview_ms"])
+                     preview_ms=stats["preview_ms"],
+                     first_speech_ms=stats["first_speech_ms"],
+                     head_db=stats["head_db"])
 
     def _decode_worker(self, pending: "queue.Queue", stats: dict):
         """Decode finished segments off the capture thread.
