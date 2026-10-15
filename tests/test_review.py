@@ -1495,6 +1495,59 @@ def review21_kglobalaccel_restart_reregisters():
         else:
             sys.modules["pynput"] = saved_pynput
 
+
+# ---------------------------------------------------------------------------
+# #22 (C7)  Quitting (tray, SIGINT, SIGTERM from systemd or logout) within
+#     half a second of a paste used to take the pending clipboard restore
+#     down with the process: the dictated text stayed on the clipboard.
+# ---------------------------------------------------------------------------
+
+def review22_shutdown_flushes_clipboard_restore():
+    print("\n[#22 C7] shutdown runs a pending clipboard restore; SIGTERM shuts down")
+    world = ClipboardWorld()
+    undo = world.install()
+    try:
+        typer = da_insert.TextTyper("clipboard")
+        flush = getattr(typer, "flush_restore", None)
+        check("TextTyper has flush_restore()", callable(flush))
+        typer.type_text("dictated")
+        typer.wait_idle()
+        check("right after the paste the clipboard holds the dictated text",
+              world.sel["clip"] == b"dictated ", repr(world.sel["clip"]))
+        if callable(flush):
+            t0 = time.monotonic()
+            flush()
+            dt = time.monotonic() - t0
+            check("flush_restore() puts the user's selections back before returning",
+                  world.sel["clip"] == b"USER-OLD" and world.sel["primary"] == b"USER-P",
+                  str(world.sel))
+            check("waiting at most out the paste's restore delay",
+                  dt <= da_insert.RESTORE_AFTER_S + 0.2, f"{dt * 1000:.0f} ms")
+            check("and nothing is left pending", not typer._clip_restore_pending)
+            n = len(world.argv)
+            time.sleep(da_insert.RESTORE_AFTER_S + 0.3)
+            check("the timer it replaced does not restore a second time",
+                  len(world.argv) == n, str(world.argv[n:]))
+            flush()
+            check("a flush with nothing pending touches nothing", len(world.argv) == n)
+    finally:
+        undo()
+
+    flushed = []
+
+    class FlushTyper(NotBeforeTyper):
+        def flush_restore(self):
+            flushed.append(1)
+
+    ctl, eng, _ov = make_controller()
+    ctl._typer = FlushTyper()
+    ctl.shutdown()
+    check("controller.shutdown() flushes the typer's restore", flushed == [1], str(flushed))
+
+    src = (HERE.parent / "parakeet_dictation" / "app.py").read_text()
+    check("app.py handles SIGTERM on the main loop",
+          "signal.SIGTERM" in src and "unix_signal_add" in src)
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1517,7 +1570,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             18: review18_portal_error_mid_chord,
             19: review19_bad_pynput_binding,
             20: review20_stop_honours_paste_min_delay,
-            21: review21_kglobalaccel_restart_reregisters}
+            21: review21_kglobalaccel_restart_reregisters,
+            22: review22_shutdown_flushes_clipboard_restore}
 
 
 def main(argv):

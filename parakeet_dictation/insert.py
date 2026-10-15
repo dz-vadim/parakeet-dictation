@@ -538,6 +538,7 @@ class TextTyper:
         self._clip_lock = threading.RLock()
         self._clip_saved = None        # (clipboard, primary) of the user's
         self._clip_restore_pending = False
+        self._clip_restore_due = 0.0   # monotonic time the restore is timed for
         self._clip_gen = 0
         # The insertion queue.  Every public entry point hands its work to
         # ONE worker thread (started on demand, gone when the queue is empty)
@@ -687,6 +688,7 @@ class TextTyper:
                     self._on_failure("Text is on the clipboard — press Ctrl+V")
                 return
             if not self._keep_on_clipboard:
+                self._clip_restore_due = time.monotonic() + RESTORE_AFTER_S
                 self._restore_clipboard_later(saved, gen)
 
     @staticmethod
@@ -738,6 +740,25 @@ class TextTyper:
                 self._restore_selections(saved)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def flush_restore(self):
+        """Run a pending clipboard restore now, synchronously.  For quit
+        paths: the restore timer is a daemon thread, and a process exiting
+        within RESTORE_AFTER_S of a paste took it along, leaving the
+        dictated text on the clipboard.  The paste still gets its delay —
+        the target window may not have read the selection yet."""
+        with self._clip_lock:
+            if not self._clip_restore_pending:
+                return
+            wait = self._clip_restore_due - time.monotonic()
+        if wait > 0:
+            time.sleep(min(wait, RESTORE_AFTER_S))
+        with self._clip_lock:
+            if not self._clip_restore_pending:
+                return              # the timer got there first
+            self._clip_gen += 1     # and it must not run after this
+            self._restore_selections(self._clip_saved)
+        DIAG.log("clipboard_restore_flushed")
 
     def _restore_selections(self, saved):
         """Write `saved` (clipboard, primary) back and clear the restore state.

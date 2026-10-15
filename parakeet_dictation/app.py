@@ -90,7 +90,18 @@ def main():
     main_window.on_apply_settings = tray.apply_settings
     controller.notify(hotkey_mgr.start())
 
-    signal.signal(signal.SIGINT, lambda *_: (controller.shutdown(), Gtk.main_quit()))
+    # SIGINT (Ctrl+C) and SIGTERM (systemd, logout, `kill`) take the same
+    # path as Quit in the tray: the take is ended and a pending clipboard
+    # restore runs before the loop exits.  On the main loop, not through
+    # signal.signal: a Python handler only runs once GTK hands control back.
+    def _signal_quit(*_):
+        DIAG.log("app_signal_quit")
+        controller.shutdown()
+        Gtk.main_quit()
+        return GLib.SOURCE_REMOVE
+
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, _signal_quit)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, _signal_quit)
 
     # Global hotkeys on Wayland: pynput cannot grab keys outside the app's own
     # windows, so the desktop's shortcut system drives us over signals instead.

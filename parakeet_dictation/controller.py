@@ -273,13 +273,17 @@ class DictationController:
             self.start()
 
     def shutdown(self):
-        """Blocking teardown for quit and SIGINT — the process is going away."""
+        """Blocking teardown for quit, SIGINT and SIGTERM — the process is
+        going away."""
         self._cancel_tail()
         self._engine.stop()
         self._typer.reset_partial()
         # A paste still in flight on the typer's worker gets to go out: the
         # process is about to exit and would take it along.
         self._typer.wait_idle(3.0)
+        # And the user's clipboard goes back before the process exits; the
+        # restore timer would die with it.
+        self._typer.flush_restore()
         if self._gesture != GESTURE_IDLE:
             self._end_take("cancel", "shutdown")
         self._overlay_state("hidden")
