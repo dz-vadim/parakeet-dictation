@@ -9,6 +9,7 @@ import signal
 
 from . import audio
 from . import insert
+from . import shortcuts
 from .config import APP_NAME, AppConfig
 from .controller import DictationController
 from .diagnostics import DIAG
@@ -82,8 +83,7 @@ def main():
         config,
         on_hold_press=lambda: (controller.hold_press(), tray and tray.update_ui()),
         on_hold_release=lambda: (controller.hold_release(), tray and tray.update_ui()),
-        # controller.toggle(hold_off=has_modifier(...)) arrives with Task 5.
-        on_toggle=lambda: (controller.toggle(), tray and tray.update_ui()),
+        on_toggle=lambda: (controller.toggle(hold_off=shortcuts.has_modifier(controller.config.hotkey_toggle)), tray and tray.update_ui()),
     )
 
     main_window = MainWindow(controller, hotkey_mgr)

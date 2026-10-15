@@ -241,7 +241,56 @@ def s4_hotkeys_two_actions():
         hk.Gio, hk.call_sync = saved
 
 
-SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions}
+def s5_controller_take_kind():
+    print("\n[5] controller: hold takes insert at the end; hold-off only after a modifier")
+    import io
+    from contextlib import redirect_stderr
+    from parakeet_dictation import config as cfgmod, controller as ctlmod
+
+    class Eng:
+        running = paused = False
+        recognizer_key = ("desktop", 4, "en")
+        def start(self): pass
+        def stop(self): self.running = False
+        def stop_async(self, *a, **k): self.running = False
+        def wait_drained(self, *a, **k): return True
+        @property
+        def is_running(self): return self.running
+        @property
+        def is_paused(self): return self.paused
+
+    def make(**kw):
+        with redirect_stderr(io.StringIO()):
+            ctl = ctlmod.DictationController(cfgmod.AppConfig(**kw))
+        ctl._engine = Eng()
+        return ctl
+
+    ctl = make(insert_mode="per_segment")
+    ctl.hold_press()
+    check("hold take inserts at end even with per_segment", ctl._insert_at_end)
+    ctl = make(insert_mode="per_segment")
+    ctl.start()
+    check("toggle take honours per_segment", not ctl._insert_at_end)
+    ctl = make(hotkey_hold="Insert")
+    ctl.hold_press(); ctl._engine.running = True; ctl._on_capture_start()
+    ctl.hold_release()
+    check("bare-key release: no hold-off", ctl._release_t == 0.0, str(ctl._release_t))
+    ctl = make(hotkey_hold="Meta+Z")
+    ctl.hold_press(); ctl._engine.running = True; ctl._on_capture_start()
+    ctl.hold_release()
+    check("modifier hold release: hold-off armed", ctl._release_t > 0.0)
+    ctl = make()
+    ctl.start(); ctl._engine.running = True; ctl._on_capture_start()
+    ctl.stop(hold_off=False)
+    check("tray stop: no hold-off", ctl._release_t == 0.0)
+    ctl = make()
+    ctl.start(); ctl._engine.running = True; ctl._on_capture_start()
+    ctl.stop()
+    check("signal/shortcut stop: hold-off armed", ctl._release_t > 0.0)
+
+
+SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions,
+            5: s5_controller_take_kind}
 
 
 def main(argv):

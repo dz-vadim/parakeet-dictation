@@ -264,7 +264,8 @@ class FakeOverlay:
 
 def run_take(audio, release_at_audio_s, insert_mode, label, preview=True,
              coalesce=0.0, preview_interval=0.0, normalize=True,
-             focus=None, after_release=None, paste_min_delay_ms=0):
+             focus=None, after_release=None, paste_min_delay_ms=0,
+             hotkey_hold="Insert"):
     """Hold the key, release it after `release_at_audio_s` of audio, report.
 
     The release is triggered off how much of the script the microphone has
@@ -292,7 +293,8 @@ def run_take(audio, release_at_audio_s, insert_mode, label, preview=True,
                                  preview=preview, coalesce_target_s=coalesce,
                                  preview_interval_s=preview_interval,
                                  normalize=normalize,
-                                 paste_min_delay_ms=paste_min_delay_ms)
+                                 paste_min_delay_ms=paste_min_delay_ms,
+                                 hotkey_hold=hotkey_hold)
     ctl = da_controller.DictationController(config)
     overlay = FakeOverlay(config)
     ctl.set_overlay(overlay)
@@ -1145,7 +1147,7 @@ def part7_paste_delay():
 
     marks, pastes, lines, _ = run_take(audio, release, "end_of_take",
                                        "  7a: paste_min_delay_ms=0 (control)",
-                                       paste_min_delay_ms=0)
+                                       paste_min_delay_ms=0, hotkey_hold="Meta+Z")
     check("control: one paste", len(pastes) == 1, f"{len(pastes)} pastes")
     if pastes:
         gap = pastes[0][0] - marks["release"]
@@ -1154,7 +1156,7 @@ def part7_paste_delay():
 
     marks, pastes, lines, _ = run_take(audio, release, "end_of_take",
                                        "  7b: paste_min_delay_ms=700",
-                                       paste_min_delay_ms=700)
+                                       paste_min_delay_ms=700, hotkey_hold="Meta+Z")
     check("delayed: still exactly one paste", len(pastes) == 1, f"{len(pastes)} pastes")
     if pastes:
         gap = pastes[0][0] - marks["release"]
@@ -1240,7 +1242,7 @@ def main():
     check("the user's clipboard survived the take", CLIP["text"] == USER_CLIPBOARD,
           repr(CLIP["text"][:50]))
 
-    # ---- per_segment really does insert while the key is down -------------
+    # ---- a hold take ignores per_segment: text waits for the release -------
     # C, not B, after the pause: cutting B mid-word makes Parakeet return an
     # empty result (B[0:2.8 s] decodes to ""), which would make this test about
     # the model rather than about the insertion path.
@@ -1249,27 +1251,22 @@ def main():
     marks, pastes, lines, overlay = run_take(
         take2, release2, "per_segment",
         "[4] hold take: speech, 1.2 s pause, speech, release mid-speech "
-        "(insert_mode=per_segment)")
+        "(insert_mode=per_segment, still inserted at the end)")
 
-    check("two insertions: the cut phrase and the flushed tail",
-          len(pastes) == 2, f"{len(pastes)} insertions")
-    check("the first landed while the key was still down",
-          bool(pastes) and pastes[0][0] < marks["release"])
-    check("the second landed after the release tail",
-          len(pastes) > 1 and pastes[1][0] > marks["tail"])
-    check("the first insertion is the pre-pause phrase",
-          bool(pastes) and carries(pastes[0][1], MARK_A),
-          pastes[0][1][:50] if pastes else "")
-    check("the second insertion is the speech pending at release",
-          len(pastes) > 1 and carries(pastes[1][1], MARK_C),
-          pastes[1][1][:50] if len(pastes) > 1 else "")
+    check("one insertion for the whole hold take",
+          len(pastes) == 1, f"{len(pastes)} insertions")
+    check("it landed after the release tail",
+          bool(pastes) and pastes[0][0] > marks["tail"])
+    check("it carries both the pre-pause phrase and the flushed tail",
+          bool(pastes) and carries(pastes[0][1], MARK_A) and carries(pastes[0][1], MARK_C),
+          pastes[0][1][:80] if pastes else "")
     check("the 1.2 s pause cut a segment on silence",
           any("event=segment " in l and "reason=silence" in l for l in lines))
     check("the release flushed one too",
           any("event=segment " in l and "reason=flush" in l for l in lines))
-    check("each insertion logged with its index within the take",
+    check("the insertion is logged as end_of_take, index 1",
           sorted(l.split("index=")[1].split()[0] for l in lines
-                 if "event=take_insert" in l) == ["1", "2"])
+                 if "event=take_insert" in l and "mode=end_of_take" in l) == ["1"])
     time.sleep(1.2)
     check("the user's clipboard survived two insertions",
           CLIP["text"] == USER_CLIPBOARD, repr(CLIP["text"][:50]))

@@ -6,6 +6,7 @@ import time
 
 from gi.repository import GLib
 
+from . import shortcuts
 from .config import AppConfig
 from .diagnostics import DIAG
 from .engine import ASREngine
@@ -69,6 +70,7 @@ class DictationController:
         self._take_inserts = 0
         self._take_stop_t0 = 0.0
         self._release_t = 0.0      # when the hotkey release came in
+        self._take_kind = "toggle"  # "hold" (push-to-talk) or "toggle"
         self._last_insert_t = 0.0
         # Focused-window probe (FocusTracker.snapshot) and the snapshot taken
         # the moment the take ended — the paste target is whatever was focused
@@ -191,15 +193,10 @@ class DictationController:
 
     @property
     def _insert_at_end(self) -> bool:
-        """Whether decoded text is held back until the take is over.
-
-        Hold mode has a natural end, so holding text back is possible there
-        at all — and required (see AppConfig.insert_mode): end_of_take is the
-        default.  A toggle session (tray or SIGUSR1; pynput cannot grab keys
-        on KDE Wayland) may run for minutes, which is why per-segment still
-        exists as a setting for that mode.
-        """
-        return self._config.insert_mode == "end_of_take"
+        """Push-to-talk always holds text back to the release: a chord sent
+        while the key is down is reported by kglobalaccel as its release.
+        A start/stop take follows insert_mode."""
+        return self._take_kind == "hold" or self._config.insert_mode == "end_of_take"
 
     def _enter(self, gesture: str, reason: str):
         if gesture == self._gesture:
@@ -229,12 +226,13 @@ class DictationController:
     def profiles_data(self) -> dict:
         return self._profiles_data
 
-    def start(self):
+    def start(self, kind: str = "toggle"):
         """Begin a take.  Safe to call from the hotkey, the tray or the window."""
         if self._gesture in (GESTURE_STARTING, GESTURE_STOPPING) or self._engine.is_running:
             DIAG.log("start_ignored", state=self._gesture, take=self._take_seq)
             return
         self._take_seq += 1
+        self._take_kind = kind
         # Nothing from an earlier take may be pasted with this one.
         self._take_chunks = []
         self._take_texts = 0
@@ -243,7 +241,7 @@ class DictationController:
         self._overlay_state("preparing")
         self._engine.start()
 
-    def stop(self):
+    def stop(self, hold_off: bool = True):
         """Stop a take from the tray, the window or SIGUSR1 — no release tail.
 
         Teardown runs off the main loop so the pill keeps animating while the
@@ -257,20 +255,20 @@ class DictationController:
             return
         self._cancel_tail()
         self._focus_at_release = self._snapshot_focus("stop")
-        # A toggle shortcut, a SIGUSR1 bound to a KDE shortcut or a tray click
-        # leaves a modifier or button just as a hold release does: the chord
-        # waits paste_min_delay_ms from here too.
-        self._release_t = time.monotonic()
+        # A toggle shortcut or a SIGUSR1 bound to a KDE shortcut may leave a
+        # modifier down just as a hold release does: the chord waits
+        # paste_min_delay_ms from here too.  A tray click leaves no key held.
+        self._release_t = time.monotonic() if hold_off else 0.0
         self._enter(GESTURE_STOPPING, "explicit")
         self._overlay_state("processing")
         self._stop_engine_async("explicit")
 
-    def toggle(self):
+    def toggle(self, hold_off: bool = True):
         if self._gesture == GESTURE_STOPPING:
             DIAG.log("toggle_ignored", reason="already_stopping", take=self._take_seq)
             return
         if self._gesture in (GESTURE_STARTING, GESTURE_RECORDING) or self._engine.is_running:
-            self.stop()
+            self.stop(hold_off=hold_off)
         else:
             self.start()
 
@@ -319,7 +317,7 @@ class DictationController:
             DIAG.log("hold_press_ignored", state=self._gesture, take=self._take_seq)
             return
         DIAG.log("hold_press", take=self._take_seq + 1)
-        self.start()
+        self.start(kind="hold")
 
     def hold_release(self):
         """Key up.  Three-valued and idempotent — see STOP_* above."""
@@ -339,7 +337,10 @@ class DictationController:
             # The target is fixed HERE, at the release: the decode still has
             # a few hundred ms to run and the user may already be elsewhere.
             self._focus_at_release = self._snapshot_focus("release")
-            self._release_t = time.monotonic()
+            # Only a binding with a modifier can leave a key physically down
+            # when the chord goes out; a bare Insert release cannot.
+            self._release_t = (time.monotonic()
+                               if shortcuts.has_modifier(self._config.hotkey_hold) else 0.0)
         if decision == STOP_PROCEED:
             # UI first, capture second: the pill must not wait out the tail.
             self._overlay_state("processing")
@@ -525,7 +526,7 @@ class DictationController:
             delay_s = max(0, int(self._config.paste_min_delay_ms)) / 1000.0
             not_before = self._release_t + delay_s
             hold_off_ms = max(0.0, (not_before - time.monotonic()) * 1000)
-        DIAG.log("take_insert", mode=self._config.insert_mode,
+        DIAG.log("take_insert", mode=("end_of_take" if self._insert_at_end else "per_segment"),
                  index=self._take_inserts, chars=len(text), segments=segments,
                  waited_ms=waited_ms, hold_off_ms=hold_off_ms, take=self._take_seq,
                  target=(getattr(target, "resource_class", "") or "unknown"))
@@ -574,7 +575,7 @@ class DictationController:
             # previous session still draining is queued behind it (see
             # ASREngine.start), so the microphone is never held twice.
             DIAG.log("queued_start_applied", after=self._take_seq)
-            self.start()
+            self.start(kind="hold")
         elif queued:
             DIAG.log("queued_start_dropped", outcome=outcome, take=self._take_seq)
 
