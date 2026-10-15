@@ -60,7 +60,38 @@ def s1_shortcuts():
         check(f"capture {name} {sorted(mods)}", got == want, str(got))
 
 
-SECTIONS = {1: s1_shortcuts}
+def s2_i18n():
+    print("\n[2] i18n: explicit language, system fallback, missing catalogue")
+    import os
+    from parakeet_dictation import i18n
+    got = i18n.setup("uk")
+    check("uk loads", got == "uk", got)
+    check("a known string is translated", i18n._("Settings") == "Налаштування", i18n._("Settings"))
+    got = i18n.setup("en")
+    check("en loads", got == "en" and i18n._("Settings") == "Settings")
+    saved = {k: os.environ.get(k) for k in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG")}
+    try:
+        for k in saved:
+            os.environ.pop(k, None)
+        os.environ["LANG"] = "uk_UA.UTF-8"
+        check("system follows LANG=uk_UA", i18n.setup("system") == "uk")
+        os.environ["LANG"] = "de_DE.UTF-8"
+        check("system with no catalogue falls back to en", i18n.setup("system") == "en"
+              and i18n._("Settings") == "Settings")
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    i18n.setup("en")
+    po = i18n.LOCALE_DIR / "uk" / "LC_MESSAGES" / "parakeet-dictation.po"
+    mo = po.with_suffix(".mo")
+    check(".mo is not older than .po", mo.stat().st_mtime >= po.stat().st_mtime - 1)
+    check("no fuzzy entries", "#, fuzzy" not in po.read_text().split("\n\n", 1)[1])
+
+
+SECTIONS = {1: s1_shortcuts, 2: s2_i18n}
 
 
 def main(argv):
