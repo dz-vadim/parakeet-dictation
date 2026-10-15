@@ -444,6 +444,45 @@ class FakeGlobalHotKeys:
         pass
 
 
+class FakeNameWatch:
+    """Gio.bus_watch_name_on_connection / bus_unwatch_name for one name."""
+
+    def __init__(self):
+        self.watches = {}
+        self._next = 1
+
+    def watch(self, _bus, name, _flags, appeared, vanished):
+        wid = self._next
+        self._next += 1
+        self.watches[wid] = (name, appeared, vanished)
+        appeared(None, name, ":1.5")      # like GIO: the name is owned right now
+        return wid
+
+    def unwatch(self, wid):
+        self.watches.pop(wid, None)
+
+    def vanish(self, name):
+        for n, _a, vanished in list(self.watches.values()):
+            if n == name:
+                vanished(None, name)
+
+    def appear(self, name):
+        for n, appeared, _v in list(self.watches.values()):
+            if n == name:
+                appeared(None, name, ":1.77")
+
+
+def fake_hotkeys_gio(bus, names=None):
+    from types import SimpleNamespace
+    from gi.repository import Gio
+    names = names or FakeNameWatch()
+    return SimpleNamespace(
+        bus_get_sync=lambda *_a: bus, BusType=Gio.BusType,
+        DBusCallFlags=Gio.DBusCallFlags, DBusSignalFlags=Gio.DBusSignalFlags,
+        BusNameWatcherFlags=Gio.BusNameWatcherFlags,
+        bus_watch_name_on_connection=names.watch, bus_unwatch_name=names.unwatch)
+
+
 def review4_hotkey_rebuild_unsubscribes():
     print("\n[#4] rebuild() leaves exactly one press/release subscription pair")
     from types import SimpleNamespace
@@ -453,9 +492,7 @@ def review4_hotkey_rebuild_unsubscribes():
     bus = FakeGioBus()
     saved_gio = da_hotkeys.Gio
     saved_pynput = sys.modules.get("pynput")
-    da_hotkeys.Gio = SimpleNamespace(
-        bus_get_sync=lambda *_a: bus, BusType=Gio.BusType,
-        DBusCallFlags=Gio.DBusCallFlags, DBusSignalFlags=Gio.DBusSignalFlags)
+    da_hotkeys.Gio = fake_hotkeys_gio(bus)
     sys.modules["pynput"] = SimpleNamespace(
         keyboard=SimpleNamespace(GlobalHotKeys=FakeGlobalHotKeys,
                                  HotKey=SimpleNamespace(parse=lambda b: [b])))
@@ -1408,6 +1445,56 @@ def review20_stop_honours_paste_min_delay():
               f"not_before={'None' if not_before is None else f'{(not_before - t_stop) * 1000:.0f} ms'}")
     ctl.shutdown()
 
+
+# ---------------------------------------------------------------------------
+# #21 (C6)  kglobalaccel restarting (a Plasma crash, kquitapp) drops every
+#     registration: push-to-talk is re-registered when the name comes back.
+# ---------------------------------------------------------------------------
+
+def review21_kglobalaccel_restart_reregisters():
+    print("\n[#21 C6] push-to-talk survives a kglobalaccel restart")
+    from types import SimpleNamespace
+    from parakeet_dictation import hotkeys as da_hotkeys
+    da_hotkeys.DIAG = TEST_DIAG
+    bus, names = FakeGioBus(), FakeNameWatch()
+    saved_gio, saved_pynput = da_hotkeys.Gio, sys.modules.get("pynput")
+    da_hotkeys.Gio = fake_hotkeys_gio(bus, names)
+    sys.modules["pynput"] = SimpleNamespace(keyboard=SimpleNamespace(
+        GlobalHotKeys=FakeGlobalHotKeys, HotKey=SimpleNamespace(parse=lambda b: [b])))
+    presses = []
+    try:
+        mgr = da_hotkeys.HotkeyManager(
+            da_config.AppConfig(hotkey_mode="hold"), on_toggle=lambda: None,
+            on_start=lambda: None, on_stop=lambda: None, on_pause=lambda: None,
+            on_hold_press=lambda: presses.append(1))
+        mgr.start()
+        svc = da_hotkeys.KGlobalAccelHotkey.SERVICE
+        check("the manager watches the kglobalaccel bus name",
+              any(n == svc for n, _a, _v in names.watches.values()), str(names.watches))
+        check("the initial appearance does not register a second time",
+              bus.calls.count("doRegister") == 1, f"doRegister x{bus.calls.count('doRegister')}")
+        before = len(diag_lines())
+        names.vanish(svc)
+        names.appear(svc)
+        check("kglobalaccel coming back registers the action again",
+              bus.calls.count("doRegister") == 2, f"doRegister x{bus.calls.count('doRegister')}")
+        check("with exactly one press/release subscription pair", len(bus.subs) == 2,
+              f"{len(bus.subs)} subscriptions")
+        check("and says so in the log",
+              bool(events(diag_lines()[before:], "hold_hotkey_reregistered")))
+        bus.emit("globalShortcutPressed", da_hotkeys.KGlobalAccelHotkey.COMPONENT,
+                 "push-to-talk")
+        check("a press after the restart fires once", presses == [1], str(presses))
+        mgr.stop()
+        check("stop() drops the watch and every subscription",
+              not names.watches and not bus.subs, f"{names.watches} {bus.subs}")
+    finally:
+        da_hotkeys.Gio = saved_gio
+        if saved_pynput is None:
+            sys.modules.pop("pynput", None)
+        else:
+            sys.modules["pynput"] = saved_pynput
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1429,7 +1516,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             17: review17_wl_copy_timeout_is_reported,
             18: review18_portal_error_mid_chord,
             19: review19_bad_pynput_binding,
-            20: review20_stop_honours_paste_min_delay}
+            20: review20_stop_honours_paste_min_delay,
+            21: review21_kglobalaccel_restart_reregisters}
 
 
 def main(argv):

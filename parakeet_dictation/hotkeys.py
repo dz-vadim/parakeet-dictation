@@ -104,6 +104,8 @@ class KGlobalAccelHotkey:
         self._action_id = [self.COMPONENT, self.ACTION, APP_NAME,
                            "Push-to-talk dictation"]
         self._subs = []
+        self._watch_id = 0
+        self._vanished = False
         self.registered = False
 
     def _call(self, path, iface, method, params, reply_type=None):
@@ -134,7 +136,8 @@ class KGlobalAccelHotkey:
         to be reported rather than assumed harmless.
         """
         key = qt_key_sequence(self._binding)
-        self._bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        if self._bus is None:
+            self._bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
 
         available = self._call(
             self.ROOT_PATH, self.ROOT_IFACE, "globalShortcutAvailable",
@@ -158,7 +161,39 @@ class KGlobalAccelHotkey:
         self.registered = True
         DIAG.log("hold_hotkey_registered", key=hex(key), path=path,
                  conflict=owner or "none")
+        if not self._watch_id:
+            # kglobalaccel forgets every component when it restarts (a
+            # Plasma crash, `kquitapp6 kglobalaccel`); without this the key
+            # silently stopped working until the app was restarted.
+            self._watch_id = Gio.bus_watch_name_on_connection(
+                self._bus, self.SERVICE, Gio.BusNameWatcherFlags.NONE,
+                self._on_service_appeared, self._on_service_vanished)
         return owner
+
+    def _on_service_vanished(self, _conn, _name):
+        if self.registered:
+            self._vanished = True
+            DIAG.log("hold_hotkey_lost", reason="kglobalaccel_vanished")
+
+    def _on_service_appeared(self, _conn, _name, _owner):
+        # The watch reports the name as soon as it is armed; only a
+        # re-appearance after a loss needs a new registration.
+        if not self._vanished:
+            return
+        self._vanished = False
+        self._drop_subscriptions()
+        try:
+            owner = self.register()
+        except (GLib.Error, ValueError) as e:
+            self.registered = False
+            DIAG.log("hold_hotkey_failed", err=type(e).__name__, stage="reregister")
+            return
+        DIAG.log("hold_hotkey_reregistered", conflict=owner or "none")
+
+    def _drop_subscriptions(self):
+        for sub in self._subs:
+            self._bus.signal_unsubscribe(sub)
+        self._subs = []
 
     def _handle_press(self, _conn, _sender, _path, _iface, _signal, params):
         if params.unpack()[1] == self.ACTION:
@@ -173,9 +208,11 @@ class KGlobalAccelHotkey:
         # spelling named a method Gio.DBusConnection does not have, the
         # AttributeError was swallowed, and every rebuild() leaked its two
         # handlers — after N settings saves each key press fired N+1 times.
-        for sub in self._subs:
-            self._bus.signal_unsubscribe(sub)
-        self._subs = []
+        if self._watch_id:
+            Gio.bus_unwatch_name(self._watch_id)
+            self._watch_id = 0
+        self._vanished = False
+        self._drop_subscriptions()
         if self.registered:
             try:
                 self._call(self.ROOT_PATH, self.ROOT_IFACE, "unRegister",
