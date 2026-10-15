@@ -26,7 +26,7 @@ Findings, most severe first. Each is fixed in its own commit referencing this li
 10. audio.py `_BlockCoalescer.add` (disabled path) does not bump `closed`; the preview's
     staleness guard is inert, duplicating committed words on the panel.
 11. tests/test_defects.py defect 4 runs the real `main()` against the user's real config.
-12. tests/ptt_state.py, tests/overlay_safety.py hard-code `/home/dz/Projects/parakeet-dictation`.
+12. tests/ptt_state.py, tests/overlay_safety.py hard-code `<checkout>` (an absolute path to the author's home).
 13. focus.py `snapshot()` can do synchronous D-Bus round trips (0.5–6 s) on the GTK main
     thread at key release; move rechecks to the bus watcher / a timer, make snapshot() cache-only.
 14. insert.py `_clipboard_paste` runs on the GTK main thread (wl-paste 2 s timeouts, spawns,
