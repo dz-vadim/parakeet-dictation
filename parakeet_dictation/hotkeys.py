@@ -12,7 +12,7 @@ from .config import APP_ID, APP_NAME, AppConfig
 from .dbus import call_sync
 from .diagnostics import DIAG
 from .i18n import _
-from .shortcuts import binding_from_qt, qt_key_sequence  # noqa: F401  (re-export)
+from .shortcuts import binding_from_qt, is_valid, qt_key_sequence  # noqa: F401  (re-export)
 
 # ---------------------------------------------------------------------------
 # Global shortcuts via kglobalaccel
@@ -190,10 +190,17 @@ class HotkeyManager:
     """
 
     ACTIONS = (
-        # (config key, action id, description shown in System Settings)
-        ("hotkey_hold", "push-to-talk", "Hold to talk"),
-        ("hotkey_toggle", "toggle", "Start / stop dictation"),
+        # (config key, action id)
+        ("hotkey_hold", "push-to-talk"),
+        ("hotkey_toggle", "toggle"),
     )
+
+    @staticmethod
+    def _description(action: str) -> str:
+        """The action's name in System Settings > Shortcuts.  Looked up at
+        registration, not import: the catalogue is loaded after this module."""
+        return {"push-to-talk": _("Hold to talk"),
+                "toggle": _("Start / stop dictation")}[action]
 
     def __init__(self, config: AppConfig, on_hold_press, on_hold_release, on_toggle,
                  on_binding_changed=None):
@@ -208,12 +215,13 @@ class HotkeyManager:
 
     def start(self) -> str:
         problems = []
-        for key, action, description in self.ACTIONS:
+        for key, action in self.ACTIONS:
             binding = getattr(self._config, key)
             if not binding:
                 continue
             press, release = self._callbacks[action]
-            hotkey = KGlobalAccelHotkey(binding, action, description, press, release)
+            hotkey = KGlobalAccelHotkey(binding, action, self._description(action),
+                                        press, release)
             try:
                 owner = hotkey.register()
             except (GLib.Error, ValueError) as e:
@@ -244,7 +252,7 @@ class HotkeyManager:
         action_id, keys = params.unpack()
         if len(action_id) < 2 or action_id[0] != KGlobalAccelHotkey.COMPONENT:
             return
-        config_key = {a: k for k, a, _d in self.ACTIONS}.get(action_id[1])
+        config_key = {a: k for k, a in self.ACTIONS}.get(action_id[1])
         if config_key is None:
             return
         # a(ai): a list of 1-tuples, each holding the key ints of one
@@ -252,10 +260,11 @@ class HotkeyManager:
         # zeros, is a binding cleared in KDE.
         chords = [k for k in (keys[0][0] if keys and keys[0] else []) if k]
         binding = binding_from_qt(chords[0]) if chords else ""
-        if len(chords) > 1 or (chords and not binding):
-            # A multi-chord sequence or a key we cannot name (media keys,
-            # non-ASCII): saving it would truncate or wipe the user's KDE
-            # binding, so the config keeps what it has.
+        if len(chords) > 1 or (chords and not binding) or not is_valid(binding):
+            # A multi-chord sequence, a key we cannot name (media keys,
+            # non-ASCII) or one whose name does not parse back ("Meta++"):
+            # saving it would truncate or wipe the user's KDE binding, or
+            # be reset by enforce(), so the config keeps what it has.
             DIAG.log("hotkey_changed_in_kde", action=action_id[1], unsupported=1)
             return
         if binding == getattr(self._config, config_key):

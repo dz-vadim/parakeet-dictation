@@ -231,11 +231,26 @@ def s4_hotkeys_two_actions():
         got = kde_change("push-to-talk", [])
         check("a binding cleared in KDE is reported as \"\"",
               got == [("hotkey_hold", "")], str(got))
+        got = kde_change("toggle", [([0x10000000 | 0x2B],)])  # Meta and the "+" key
+        check("M4: a key that names to an invalid binding (Meta++) is not reported",
+              got == [], str(got))
         mgr.stop()
         calls.clear()
         status = mgr.rebuild(cfgmod.AppConfig(hotkey_toggle=""))
         regs = [p[0][1] for m, p in calls if m == "doRegister"]
         check("empty toggle is not registered", regs == ["push-to-talk"], str(regs))
+        check("D7: English action descriptions",
+              [p[0][3] for m, p in calls if m == "doRegister"] == ["Hold to talk"])
+        from parakeet_dictation import i18n
+        i18n.setup("uk")
+        try:
+            calls.clear()
+            mgr.rebuild(cfgmod.AppConfig())
+            descs = [p[0][3] for m, p in calls if m == "doRegister"]
+            check("D7: action descriptions shown in System Settings are translated",
+                  descs == ["Утримувати, щоб говорити", "Почати / зупинити диктування"], str(descs))
+        finally:
+            i18n.setup("en")
         check("no pynput import", "pynput" not in sys.modules)
     finally:
         hk.Gio, hk.call_sync = saved

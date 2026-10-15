@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: parakeet-dictation\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-16 01:22+0300\n"
+"POT-Creation-Date: 2026-10-16 01:29+0300\n"
 "PO-Revision-Date: 2026-10-16 00:00+0000\n"
 "Last-Translator: Parakeet Dictation\n"
 "Language-Team: Ukrainian\n"
@@ -63,12 +63,20 @@ msgstr "Пауза"
 msgid "Listening…"
 msgstr "Слухаю…"
 
-#: parakeet_dictation/hotkeys.py:221
+#: parakeet_dictation/hotkeys.py:202
+msgid "Hold to talk"
+msgstr "Утримувати, щоб говорити"
+
+#: parakeet_dictation/hotkeys.py:203
+msgid "Start / stop dictation"
+msgstr "Почати / зупинити диктування"
+
+#: parakeet_dictation/hotkeys.py:229
 #, python-brace-format
 msgid "{binding} could not be registered: {error}"
 msgstr "Не вдалося зареєструвати {binding}: {error}"
 
-#: parakeet_dictation/hotkeys.py:227
+#: parakeet_dictation/hotkeys.py:235
 #, python-brace-format
 msgid ""
 "{binding} is already used by {owner} — change it in Settings or in System "
@@ -278,7 +286,7 @@ msgid "Download"
 msgstr "Завантажити"
 
 #: parakeet_dictation/ui/settings/pages.py:173
-#: parakeet_dictation/ui/windows.py:118
+#: parakeet_dictation/ui/windows.py:122
 #, python-brace-format
 msgid "Download failed: {error}"
 msgstr "Не вдалося завантажити: {error}"
@@ -517,12 +525,12 @@ msgstr ""
 msgid "Could not change Start at login: {error}"
 msgstr "Не вдалося змінити запуск під час входу в систему: {error}"
 
-#: parakeet_dictation/ui/windows.py:16 parakeet_dictation/ui/windows.py:33
+#: parakeet_dictation/ui/windows.py:19 parakeet_dictation/ui/windows.py:36
 #, python-brace-format
 msgid "Welcome to {app}"
 msgstr "Вітаємо в {app}"
 
-#: parakeet_dictation/ui/windows.py:40
+#: parakeet_dictation/ui/windows.py:43
 msgid ""
 "Three speech recognition models will be downloaded\n"
 "so you can switch between them freely."
@@ -530,23 +538,23 @@ msgstr ""
 "Буде завантажено три моделі розпізнавання мовлення,\n"
 "щоб ви могли вільно перемикатися між ними."
 
-#: parakeet_dictation/ui/windows.py:42
+#: parakeet_dictation/ui/windows.py:45
 #, python-brace-format
 msgid "Total download: {size}"
 msgstr "Загальний обсяг: {size}"
 
-#: parakeet_dictation/ui/windows.py:43 parakeet_dictation/ui/windows.py:56
+#: parakeet_dictation/ui/windows.py:46 parakeet_dictation/ui/windows.py:59
 msgid "MB"
 msgstr "МБ"
 
-#: parakeet_dictation/ui/windows.py:52
+#: parakeet_dictation/ui/windows.py:55
 msgid "Streaming"
 msgstr "Потокова"
 
-#: parakeet_dictation/ui/windows.py:52
+#: parakeet_dictation/ui/windows.py:55
 msgid "VAD-segmented"
 msgstr "VAD-сегментована"
 
-#: parakeet_dictation/ui/windows.py:70
+#: parakeet_dictation/ui/windows.py:73
 msgid "Download All Models"
 msgstr "Завантажити всі моделі"
