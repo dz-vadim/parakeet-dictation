@@ -1,196 +1,139 @@
-"""System tray indicator."""
+"""System tray indicator: renders ui.menu_model, owns the settings window."""
+
+import copy
+from pathlib import Path
 
 from gi.repository import AyatanaAppIndicator3, Gtk
 
-from ..config import APP_ID, APP_NAME, AppConfig
-from ..controller import DictationController
-from ..hotkeys import HotkeyManager
+from ..audio import list_input_devices
+from ..config import APP_ID, AppConfig
 from ..models import _is_model_downloaded
-from .windows import MainWindow, SettingsDialog
-from pathlib import Path
+from . import menu_model
 
 _ICONS_DIR = Path(__file__).resolve().parent.parent / "data" / "icons"
-ICON_STYLES = (("mic", "Microphone"), ("parrot", "Parrot"), ("wave", "Waveform"))
-_LEGACY_ICON = {
-    "idle": "audio-input-microphone-muted",
-    "listening": "audio-input-microphone",
-    "paused": "audio-input-microphone-muted",
-}
+_LEGACY_ICON = {"idle": "audio-input-microphone-muted",
+                "listening": "audio-input-microphone",
+                "paused": "audio-input-microphone-muted"}
 
-# ---------------------------------------------------------------------------
-# System tray
-# ---------------------------------------------------------------------------
 
 class TrayIcon:
-    def __init__(self, controller: DictationController, hotkey_mgr: HotkeyManager,
-                 main_window: MainWindow):
+    def __init__(self, controller, hotkey_mgr):
         self._controller = controller
         self._hotkey_mgr = hotkey_mgr
-        self._main_window = main_window
-
+        self._settings = None
         self._indicator = AyatanaAppIndicator3.Indicator.new(
-            APP_ID,
-            "audio-input-microphone-muted",
-            AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS,
-        )
+            APP_ID, "audio-input-microphone-muted",
+            AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS)
         self._custom_icons = (_ICONS_DIR / "parakeet-mic-idle.svg").is_file()
         if self._custom_icons:
             self._indicator.set_icon_theme_path(str(_ICONS_DIR))
-            self._indicator.set_icon_full(self._icon_name("idle"), "Idle")
         self._indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.ACTIVE)
-        self._indicator.set_title(APP_NAME)
+        controller.set_status_callback(lambda _text: self.update_ui())
+        self.update_ui()
 
-        self._build_menu()
-        controller.set_status_callback(self._on_status_update)
-
-    def _build_menu(self):
-        menu = Gtk.Menu()
-        cfg = self._controller.config
-
-        show_window_item = Gtk.MenuItem(label="Show Window")
-        show_window_item.connect("activate", lambda _: (self._main_window.show_all(), self._main_window.present()))
-        menu.append(show_window_item)
-
-        menu.append(Gtk.SeparatorMenuItem())
-
-        self._toggle_item = Gtk.MenuItem(label=f"Start Dictation ({cfg.hotkey_toggle})")
-        self._toggle_item.connect("activate", self._on_toggle)
-        menu.append(self._toggle_item)
-
-        self._pause_item = Gtk.MenuItem(label="Pause")
-        self._pause_item.connect("activate", lambda _: self._controller.pause())
-        self._pause_item.set_sensitive(False)
-        menu.append(self._pause_item)
-
-        self._status_item = Gtk.MenuItem(label="Idle")
-        self._status_item.set_sensitive(False)
-        menu.append(self._status_item)
-
-        menu.append(Gtk.SeparatorMenuItem())
-
-        # Model switcher submenu
-        model_menu_item = Gtk.MenuItem(label="Model")
-        model_submenu = Gtk.Menu()
-        active_profile = cfg.model_profile
-        for mid, mdata in self._controller.profiles.items():
-            downloaded = _is_model_downloaded(mid, self._controller.profiles)
-            label = mdata["name"]
-            if mid == active_profile:
-                label = f"\u2713 {label}"
-            elif not downloaded:
-                label = f"  {label} (not downloaded)"
-            else:
-                label = f"  {label}"
-            item = Gtk.MenuItem(label=label)
-            if downloaded and mid != active_profile:
-                item.connect("activate", self._on_switch_model, mid)
-            else:
-                item.set_sensitive(False)
-            model_submenu.append(item)
-        model_menu_item.set_submenu(model_submenu)
-        menu.append(model_menu_item)
-
-        # Tray icon style submenu
-        if getattr(self, "_custom_icons", False):
-            icon_menu_item = Gtk.MenuItem(label="Tray Icon")
-            icon_submenu = Gtk.Menu()
-            active_style = getattr(cfg, "tray_icon_style", "mic")
-            for style, label in ICON_STYLES:
-                text = f"\u2713 {label}" if style == active_style else f"  {label}"
-                item = Gtk.MenuItem(label=text)
-                if style != active_style:
-                    item.connect("activate", self._on_switch_icon_style, style)
-                else:
-                    item.set_sensitive(False)
-                icon_submenu.append(item)
-            icon_menu_item.set_submenu(icon_submenu)
-            menu.append(icon_menu_item)
-
-        menu.append(Gtk.SeparatorMenuItem())
-
-        settings_item = Gtk.MenuItem(label="Settings")
-        settings_item.connect("activate", self._on_settings)
-        menu.append(settings_item)
-
-        menu.append(Gtk.SeparatorMenuItem())
-
-        quit_item = Gtk.MenuItem(label="Quit")
-        quit_item.connect("activate", self._on_quit)
-        menu.append(quit_item)
-
-        menu.show_all()
-        self._indicator.set_menu(menu)
+    # -- state ---------------------------------------------------------------
+    def _state(self) -> str:
+        if not self._controller.is_running:
+            return "idle"
+        return "paused" if self._controller.is_paused else "recording"
 
     def _icon_name(self, state: str) -> str:
-        """Themed icon name for a state, honouring tray_icon_style."""
-        if getattr(self, "_custom_icons", False):
-            style = getattr(self._controller.config, "tray_icon_style", "mic")
-            if style not in ("mic", "parrot", "wave"):
-                style = "mic"
-            return f"parakeet-{style}-{state}"
-        return _LEGACY_ICON[state]
-
-    def _on_switch_icon_style(self, _item, style):
-        cfg = self._controller.config
-        cfg.tray_icon_style = style
-        self.apply_settings(cfg)
-
-    def _on_switch_model(self, _item, model_id):
-        cfg = self._controller.config
-        cfg.model_profile = model_id
-        self.apply_settings(cfg)
-
-    def _on_toggle(self, _item=None):
-        self._controller.toggle()
-        self.update_ui()
+        icon_state = {"idle": "idle", "recording": "listening", "paused": "paused"}[state]
+        if self._custom_icons:
+            return f"parakeet-{self._controller.config.tray_icon_style}-{icon_state}"
+        return _LEGACY_ICON[icon_state]
 
     def update_ui(self):
-        running = self._controller.is_running
-        paused = self._controller.is_paused
+        state = self._state()
         cfg = self._controller.config
+        self._indicator.set_icon_full(self._icon_name(state), state)
+        self._indicator.set_title(menu_model.tooltip(state, cfg))
+        try:
+            devices = [d["name"] for d in list_input_devices()]
+        except Exception:
+            devices = []
+        profiles = self._controller.profiles
+        downloaded = {m for m in profiles if _is_model_downloaded(m, profiles)}
+        items = menu_model.build_menu(state, cfg, profiles, downloaded, devices)
+        self._indicator.set_menu(self._render(items))
 
-        if running:
-            if paused:
-                self._toggle_item.set_label("Resume Dictation")
-                self._indicator.set_icon_full(self._icon_name("paused"), "Paused")
+    # -- rendering -------------------------------------------------------------
+    def _render(self, items) -> Gtk.Menu:
+        menu = Gtk.Menu()
+        group = None
+        for item in items:
+            if item.kind == "separator":
+                menu.append(Gtk.SeparatorMenuItem())
+                continue
+            if item.kind == "submenu":
+                mi = Gtk.MenuItem(label=item.label)
+                mi.set_submenu(self._render(item.children))
+            elif item.kind == "radio":
+                mi = Gtk.RadioMenuItem.new_with_label_from_widget(group, item.label)
+                group = group or mi
+                mi.set_active(item.active)
+                mi.connect("toggled", lambda w, a=item.action: w.get_active() and self._do(a))
             else:
-                self._toggle_item.set_label(f"Stop Dictation ({cfg.hotkey_toggle})")
-                self._indicator.set_icon_full(self._icon_name("listening"), "Listening")
-            self._pause_item.set_sensitive(True)
-        else:
-            self._toggle_item.set_label(f"Start Dictation ({cfg.hotkey_toggle})")
-            self._indicator.set_icon_full(self._icon_name("idle"), "Idle")
-            self._pause_item.set_sensitive(False)
-            self._status_item.set_label("Idle")
+                mi = Gtk.MenuItem(label=f"{item.label}\t{item.accel}" if item.accel else item.label)
+                mi.connect("activate", lambda _w, a=item.action: self._do(a))
+            menu.append(mi)
+        menu.show_all()
+        return menu
 
-    def _on_status_update(self, text: str):
+    # -- actions ---------------------------------------------------------------
+    def _do(self, action: str):
+        cfg = self._controller.config
+        if action == "toggle":
+            self._controller.toggle(hold_off=False)
+        elif action in ("pause", "resume"):
+            self._controller.pause()
+        elif action == "settings":
+            self.open_settings("general")
+        elif action == "about":
+            self.open_settings("about")
+        elif action == "download_models":
+            self.open_settings("recognition")
+        elif action == "quit":
+            self._controller.shutdown()
+            Gtk.main_quit()
+            return
+        elif action.startswith("mic:"):
+            new = copy.deepcopy(cfg)
+            new.audio_device = action[4:]
+            if new.audio_device != cfg.audio_device:
+                self.apply_settings(new)
+            return
+        elif action.startswith("model:"):
+            new = copy.deepcopy(cfg)
+            new.model_profile = action[6:]
+            if new.model_profile != cfg.model_profile:
+                self.apply_settings(new)
+            return
         self.update_ui()
-        self._main_window.on_status_update(text)
-        if text:
-            display = text[:60] + "\u2026" if len(text) > 60 else text
-            self._status_item.set_label(f"\u25b6 {display}")
-        else:
-            if self._controller.is_running:
-                self._status_item.set_label("Ready")
-            else:
-                self._status_item.set_label("Idle")
 
-    def _on_settings(self, _item):
-        SettingsDialog(
-            self._controller.config,
-            self._controller.profiles_data,
-            on_save=self.apply_settings,
-        )
+    def open_settings(self, page: str = "general"):
+        if self._settings is None:
+            from .settings import SettingsWindow
+            self._settings = SettingsWindow(lambda: self._controller.config,
+                                            self._controller.profiles_data,
+                                            on_apply=self.apply_settings,
+                                            on_models_changed=self.update_ui)
+        elif not self._settings.get_visible():
+            # Long-lived window: the config, autostart and devices may have
+            # changed (tray menu, KDE shortcuts) since it was last shown.
+            self._settings.refresh_from_config()
+        self._settings.show_page(page)
+        self._settings.present()
 
-    def apply_settings(self, cfg: AppConfig):
-        """The one place a settings change lands, whichever window made it:
-        apply (which saves), rebuild the hotkeys and report a conflict, then
-        refresh the menu and the indicator."""
+    def apply_settings(self, cfg: AppConfig) -> str:
+        """The one place a settings change lands (window, menu, KDE)."""
         self._controller.apply_config(cfg)
-        self._controller.notify(self._hotkey_mgr.rebuild(cfg))
-        self._build_menu()
+        problem = self._hotkey_mgr.rebuild(cfg)
+        self._controller.notify(problem)
         self.update_ui()
+        return problem
 
-    def _on_quit(self, _item):
-        self._controller.shutdown()
-        Gtk.main_quit()
+    def on_binding_changed(self, key: str, binding: str):
+        new = copy.deepcopy(self._controller.config)
+        setattr(new, key, binding)
+        self.apply_settings(new)

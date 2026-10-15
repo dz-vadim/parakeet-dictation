@@ -6,7 +6,7 @@ from gi.repository import GLib, Gtk
 
 from ... import __version__
 from ...audio import list_input_devices
-from ...config import APP_NAME, DATA_DIR
+from ...config import _RANGES, APP_NAME, DATA_DIR, AppConfig
 from ...i18n import _
 from ...models import _download_model, _is_model_downloaded
 from .widgets import Section, device_choices
@@ -32,11 +32,22 @@ def general(win):
     shortcuts.row(None, kde)
 
     mic = Section(_("Microphone"))
-    try:
-        names = [d["name"] for d in list_input_devices()]
-    except Exception:
-        names = []
-    mic.row(_("Device:"), win.bind_combo("audio_device", device_choices(win.draft.get("audio_device"), names)))
+
+    def mic_choices():
+        try:
+            names = [d["name"] for d in list_input_devices()]
+        except Exception:
+            names = []
+        return device_choices(win.draft.get("audio_device"), names)
+    combo = win.bind_combo("audio_device", mic_choices())
+
+    def refill_mics():
+        # Only the choices; the selection follows in reload_widgets().
+        combo.remove_all()
+        for cid, label in mic_choices():
+            combo.append(cid, label)
+    win.refresh_devices = refill_mics
+    mic.row(_("Device:"), combo)
 
     sounds = Section(_("Sounds"))
     beep_on = Gtk.CheckButton(label=_("Beep at start and end"))
@@ -51,8 +62,8 @@ def general(win):
         # write the half-updated widget state back into the draft.
         syncing.append(True)
         on = win.draft.get("beep_volume") > 0
-        if on:
-            volume.set_value(win.draft.get("beep_volume"))
+        # Off shows the default, so ticking the box gives an audible volume.
+        volume.set_value(win.draft.get("beep_volume") if on else AppConfig().beep_volume)
         beep_on.set_active(on)
         volume.set_sensitive(on)
         syncing.pop()
@@ -209,14 +220,14 @@ def output(win):
 
 def advanced(win):
     perf = Section(_("Performance"))
-    perf.row(_("CPU threads:"), win.bind_spin("num_threads", 1, 16, 1))
+    perf.row(_("CPU threads:"), win.bind_spin("num_threads", *_RANGES["num_threads"], 1))
     pause = Gtk.Box(spacing=6)
-    pause.pack_start(win.bind_spin("vad_min_silence", 0.2, 3.0, 0.1, digits=1), False, False, 0)
+    pause.pack_start(win.bind_spin("vad_min_silence", *_RANGES["vad_min_silence"], 0.1, digits=1), False, False, 0)
     pause.pack_start(Gtk.Label(label=_("s")), False, False, 0)
     perf.row(_("Pause that ends a phrase:"), pause)
     paste = Section(_("Pasting"))
     delay = Gtk.Box(spacing=6)
-    delay.pack_start(win.bind_spin("paste_min_delay_ms", 0, 2000, 50), False, False, 0)
+    delay.pack_start(win.bind_spin("paste_min_delay_ms", *_RANGES["paste_min_delay_ms"], 50), False, False, 0)
     delay.pack_start(Gtk.Label(label=_("ms")), False, False, 0)
     paste.row(_("Delay after a shortcut with Meta/Ctrl/Alt:"), delay,
               _("Only when the take was ended by a shortcut with a modifier."))

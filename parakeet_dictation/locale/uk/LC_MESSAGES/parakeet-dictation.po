@@ -277,3 +277,28 @@ msgstr "Ліцензія MIT · © Daniel Rosehill, Vadym Dziuba"
 
 msgid "Parakeet TDT model — NVIDIA, CC-BY-4.0 · TEN VAD — Agora, Apache-2.0 with additional conditions"
 msgstr "Модель Parakeet TDT — NVIDIA, CC-BY-4.0 · TEN VAD — Agora, Apache-2.0 з додатковими умовами"
+
+msgid "Welcome to {app}"
+msgstr "Вітаємо в {app}"
+
+msgid ""
+"Three speech recognition models will be downloaded\n"
+"so you can switch between them freely."
+msgstr ""
+"Буде завантажено три моделі розпізнавання мовлення,\n"
+"щоб ви могли вільно перемикатися між ними."
+
+msgid "Total download: {size}"
+msgstr "Загальний обсяг: {size}"
+
+msgid "MB"
+msgstr "МБ"
+
+msgid "Streaming"
+msgstr "Потокова"
+
+msgid "VAD-segmented"
+msgstr "VAD-сегментована"
+
+msgid "Download All Models"
+msgstr "Завантажити всі моделі"

@@ -8,6 +8,7 @@ configurable hotkeys and VAD-segmented or true streaming transcription.
 import signal
 
 from . import audio
+from . import i18n
 from . import insert
 from . import shortcuts
 from .config import APP_NAME, AppConfig
@@ -18,8 +19,6 @@ from .hotkeys import HotkeyManager
 from .instance import InstanceLock
 from .models import _any_model_downloaded, migrate_legacy_models
 from .ui.overlay import PillOverlay
-from .ui.tray import TrayIcon
-from .ui.windows import MainWindow, WelcomeDialog
 # After the .ui imports: gi.require_version() runs in parakeet_dictation/ui/__init__.py.
 from gi.repository import GLib, Gtk  # noqa: E402
 
@@ -33,6 +32,10 @@ def main():
     # where the unparseable file was backed up to.
     config = AppConfig.load(log=DIAG.log)
     audio._active_config = config
+    # Before the UI modules below: some build translated strings at import time.
+    i18n.setup(config.ui_language)
+    from .ui.tray import TrayIcon
+    from .ui.windows import WelcomeDialog
 
     DIAG.set_enabled(config.diagnostics)
 
@@ -84,12 +87,10 @@ def main():
         on_hold_press=lambda: (controller.hold_press(), tray and tray.update_ui()),
         on_hold_release=lambda: (controller.hold_release(), tray and tray.update_ui()),
         on_toggle=lambda: (controller.toggle(hold_off=shortcuts.has_modifier(controller.config.hotkey_toggle)), tray and tray.update_ui()),
+        on_binding_changed=lambda k, b: tray and tray.on_binding_changed(k, b),
     )
 
-    main_window = MainWindow(controller, hotkey_mgr)
-
-    tray = TrayIcon(controller, hotkey_mgr, main_window)
-    main_window.on_apply_settings = tray.apply_settings
+    tray = TrayIcon(controller, hotkey_mgr)
     controller.notify(hotkey_mgr.start())
 
     # SIGINT (Ctrl+C) and SIGTERM (systemd, logout, `kill`) take the same
@@ -108,7 +109,7 @@ def main():
     # Scripts and other shortcut tools can drive the app over signals too:
     # `parakeet-toggle` sends SIGUSR1 (toggle); SIGUSR2 pauses.
     def _signal_toggle(*_):
-        controller.toggle()
+        controller.toggle()            # hold-off stays on: usually sent by a KDE shortcut
         if tray:
             tray.update_ui()
         return GLib.SOURCE_CONTINUE
@@ -130,7 +131,7 @@ def main():
     profile_name = controller.profiles.get(
         config.model_profile, {}
     ).get("name", config.model_profile)
-    mode_desc = f"Hold {config.hotkey_hold} to talk, {config.hotkey_toggle or 'no'} start/stop shortcut"
+    mode_desc = f"Hold {config.hotkey_hold or '-'} to talk · start/stop {config.hotkey_toggle or '-'}"
     print(f"{APP_NAME} running. {mode_desc}.")
     print(f"Model: {profile_name} | Typer: {config.typer} | Threads: {config.num_threads}")
 

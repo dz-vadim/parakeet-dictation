@@ -463,12 +463,138 @@ def s10_settings_window():
     check("building from a non-default config leaves the draft clean",
           not win.draft.dirty and not win.apply_button.get_sensitive(), str(win.draft.changed_keys()))
     win.destroy()
+    # R9: spin bounds come from config._RANGES; beeps-off slider; Start-at-login failure.
+    win = SettingsWindow(lambda: cfgmod.AppConfig(beep_volume=0.0), load_model_profiles(),
+                         on_apply, lambda: None)
+
+    def walk(w):
+        yield w
+        if isinstance(w, Gtk.Container):
+            for c in w.get_children():
+                yield from walk(c)
+    ranges = {tuple(s.get_range()) for s in walk(win) if isinstance(s, Gtk.SpinButton)}
+    for key in ("num_threads", "vad_min_silence", "paste_min_delay_ms"):
+        lo, hi = cfgmod._RANGES[key]
+        check(f"{key} spin bounds match config._RANGES", (float(lo), float(hi)) in ranges, str(ranges))
+    scale = next(s for s in walk(win) if isinstance(s, Gtk.Scale))
+    check("beeps off: slider shows the default volume",
+          abs(scale.get_value() - cfgmod.AppConfig().beep_volume) < 1e-9, str(scale.get_value()))
+    from parakeet_dictation import autostart
+    saved_set = autostart.set_enabled
+
+    def failing(_on):
+        raise PermissionError(13, "Permission denied")
+    autostart.set_enabled = failing
+    try:
+        win.autostart_wanted = not win._autostart_initial
+        check("apply() is False when Start at login cannot change", win.apply() is False)
+        check("its message is shown", "Start at login" in win.info_label.get_text(),
+              win.info_label.get_text())
+    finally:
+        autostart.set_enabled = saved_set
+    win.destroy()
+
+
+def s11_tray():
+    print("\n[11] tray renders the menu model; actions reach the controller (GTK)")
+    from types import SimpleNamespace
+    import gi
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gtk
+    from parakeet_dictation import config as cfgmod, i18n
+    from parakeet_dictation.ui import tray as traymod
+    i18n.setup("en")
+
+    class FakeIndicator:
+        def __init__(self): self.menu = None; self.title = ""; self.icon = None
+        def set_icon_theme_path(self, *_a): pass
+        def set_icon_full(self, name, _desc): self.icon = name
+        def set_status(self, *_a): pass
+        def set_title(self, t): self.title = t
+        def set_menu(self, m): self.menu = m
+
+    ind = FakeIndicator()
+    saved = traymod.AyatanaAppIndicator3
+    traymod.AyatanaAppIndicator3 = SimpleNamespace(
+        Indicator=SimpleNamespace(new=lambda *a: ind),
+        IndicatorCategory=SimpleNamespace(APPLICATION_STATUS=0),
+        IndicatorStatus=SimpleNamespace(ACTIVE=1))
+    calls = []
+    ctl = SimpleNamespace(config=cfgmod.AppConfig(), profiles={"desktop": {"name": "P3"}},
+                          profiles_data={"profiles": {"desktop": {"name": "P3"}}},
+                          is_running=False, is_paused=False,
+                          toggle=lambda hold_off=True: calls.append(("toggle", hold_off)),
+                          pause=lambda: calls.append(("pause",)),
+                          set_status_callback=lambda cb: None, notify=lambda m: None,
+                          apply_config=lambda c: calls.append(("apply", c)))
+    mgr = SimpleNamespace(rebuild=lambda c: "")
+    try:
+        t = traymod.TrayIcon(ctl, mgr)
+        labels = [i.get_label() for i in ind.menu.get_children() if not isinstance(i, Gtk.SeparatorMenuItem)]
+        check("menu starts with Start Dictation", labels[0].startswith("Start Dictation"), str(labels))
+        check("no Show Window", not any("Show Window" in l for l in labels))
+        check("tooltip set", ind.title.endswith("hold Insert to talk"), ind.title)
+        ind.menu.get_children()[0].activate()
+        check("tray toggle stops without hold-off", calls[-1] == ("toggle", False), str(calls))
+        t.on_binding_changed("hotkey_toggle", "Meta+Alt+D")
+        check("KDE-side change applied to config", calls[-1][0] == "apply"
+              and calls[-1][1].hotkey_toggle == "Meta+Alt+D")
+    finally:
+        traymod.AyatanaAppIndicator3 = saved
+
+    # R8: a hidden long-lived settings window is refreshed when reopened.
+    import os, tempfile
+    from parakeet_dictation.ui.settings import SettingsWindow
+    saved_present = SettingsWindow.present
+    SettingsWindow.present = lambda self: None          # never map a window during tests
+    saved_xdg = os.environ.get("XDG_CONFIG_HOME")
+    tmp = tempfile.TemporaryDirectory()
+    os.environ["XDG_CONFIG_HOME"] = tmp.name
+    traymod.AyatanaAppIndicator3 = SimpleNamespace(
+        Indicator=SimpleNamespace(new=lambda *a: ind),
+        IndicatorCategory=SimpleNamespace(APPLICATION_STATUS=0),
+        IndicatorStatus=SimpleNamespace(ACTIVE=1))
+    try:
+        from parakeet_dictation import autostart
+        t = traymod.TrayIcon(ctl, mgr)
+        t.open_settings("advanced")
+        win = t._settings
+        check("settings opens on the requested page", win.current_page == "advanced")
+        win.hide()
+        ctl.config = cfgmod.AppConfig(num_threads=7, audio_device="Gone Mic")
+        autostart.set_enabled(True)
+        t.open_settings("general")
+        check("same window instance reused", t._settings is win)
+        check("reopened window shows the new config", win.draft.get("num_threads") == 7)
+        spins = []
+
+        def walk(w):
+            yield w
+            if isinstance(w, Gtk.Container):
+                for c in w.get_children():
+                    yield from walk(c)
+        values = [s.get_value() for s in walk(win) if isinstance(s, Gtk.SpinButton)]
+        check("the widget shows it too", 7.0 in values, str(values))
+        combos = [c for c in walk(win) if isinstance(c, Gtk.ComboBoxText)]
+        check("microphone combo keeps the saved-but-missing device",
+              any(c.get_active_id() == "Gone Mic" for c in combos))
+        check("autostart state re-read", win.autostart_wanted and win._autostart_initial)
+        check("Apply is disabled after the refresh", not win.apply_button.get_sensitive())
+        win.destroy()
+    finally:
+        SettingsWindow.present = saved_present
+        traymod.AyatanaAppIndicator3 = saved
+        if saved_xdg is None:
+            os.environ.pop("XDG_CONFIG_HOME", None)
+        else:
+            os.environ["XDG_CONFIG_HOME"] = saved_xdg
+        tmp.cleanup()
 
 
 SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions,
             5: s5_controller_take_kind, 6: s6_menu_model,
             7: s7_settings_draft, 8: s8_autostart, 9: s9_widgets,
-            10: s10_settings_window}
+            10: s10_settings_window, 11: s11_tray}
 
 
 def main(argv):

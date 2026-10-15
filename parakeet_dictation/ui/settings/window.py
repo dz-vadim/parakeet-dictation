@@ -22,6 +22,7 @@ class SettingsWindow(Gtk.Window):
         self._refreshers = []
         self._autostart_initial = autostart.is_enabled()
         self.autostart_wanted = self._autostart_initial
+        self.refresh_devices = lambda: None      # the General page installs the real one
         self.connect("delete-event", self._on_delete)
         # Built first: page builders may fire change handlers, which refresh it.
         self.apply_button = Gtk.Button.new_with_mnemonic(_("_Apply"))
@@ -146,6 +147,15 @@ class SettingsWindow(Gtk.Window):
         self._refreshers.append(lambda: w.set_binding(self.draft.get(key)))
         return w
 
+    def refresh_from_config(self):
+        """Re-read everything that may have changed while the window was hidden."""
+        self.draft.reload(self._get_config())
+        self._autostart_initial = autostart.is_enabled()
+        self.autostart_wanted = self._autostart_initial
+        self.refresh_devices()
+        self.info.hide()
+        self.reload_widgets()
+
     def reload_widgets(self):
         for refresh in self._refreshers:
             refresh()
@@ -173,12 +183,14 @@ class SettingsWindow(Gtk.Window):
             self._problem(problem)
             return False
         self.info.hide()
+        ok = True
         if self.autostart_wanted != self._autostart_initial:
             try:
                 autostart.set_enabled(self.autostart_wanted)
                 self._autostart_initial = self.autostart_wanted
             except OSError as e:
                 self.autostart_wanted = self._autostart_initial
+                ok = False
                 self._problem(_("Could not change Start at login: {error}").format(error=e.strerror or e))
         if self.draft.dirty:
             new = self.draft.commit(self._get_config())
@@ -187,7 +199,7 @@ class SettingsWindow(Gtk.Window):
             if problem:
                 self._problem(problem)
         self.reload_widgets()
-        return True
+        return ok
 
     def cancel(self):
         self.draft.reload(self._get_config())
