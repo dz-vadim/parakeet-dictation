@@ -547,6 +547,12 @@ def s10_settings_window():
         return state.get("result", (True, ""))
 
     win = SettingsWindow(lambda: state["cfg"], load_model_profiles(), on_apply, lambda: None)
+    # present() maps only the toplevel: every child must already be marked
+    # visible, or the real window opens empty (it did, 2026-10-16).
+    check("window content is visible before present()",
+          win.get_child().get_visible() and win.sidebar.get_visible()
+          and win.stack.get_visible() and win.apply_button.get_visible())
+    check("the info bar stays hidden until there is a problem", not win.info.get_visible())
     for page in ("general", "recognition", "output", "advanced", "about"):
         win.show_page(page)
         check(f"page {page} shown", win.stack.get_visible_child_name() == page)

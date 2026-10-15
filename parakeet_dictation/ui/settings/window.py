@@ -82,6 +82,10 @@ class SettingsWindow(Gtk.Window):
         for b in (ok, self.apply_button, cancel):
             buttons.pack_end(b, False, False, 0)
         outer.pack_start(buttons, False, False, 0)
+        # present() maps the toplevel only; the content must be visible
+        # already.  The info bar and the download progress are no_show_all,
+        # so they stay hidden until they have something to say.
+        outer.show_all()
         self.show_page("general")
         self._refresh_buttons()
 
