@@ -45,7 +45,7 @@ depends=(
   'xdg-desktop-portal-kde'
 )
 optdepends=(
-  'kglobalacceld: push-to-talk hold shortcut (KDE Plasma)'
+  'kglobalacceld: the two global shortcuts (hold and start/stop)'
   'kwin: focused-window class detection for the paste chord (KWin script)'
   'xdotool: last-resort chord transport, reaches XWayland windows only'
   'wtype: "wtype" typer on compositors with the virtual-keyboard protocol (GNOME, Sway)'
