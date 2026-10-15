@@ -51,6 +51,11 @@ _LONE_MODIFIERS = {
 _BARE_OK = {"Insert", "Pause", "ScrollLock", "Menu", "Print"} | {f"F{n}" for n in range(1, 25)}
 
 
+# The chords the app itself presses to paste text: bound as a shortcut, every
+# insertion would also fire it.
+PASTE_CHORDS = frozenset({"Ctrl+V", "Ctrl+Shift+V", "Shift+Insert"})
+
+
 def qt_key_sequence(binding: str) -> int:
     """KDE shortcut string -> Qt key int.  Raises ValueError.
 

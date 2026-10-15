@@ -1,8 +1,9 @@
 """Building blocks shared by the settings pages."""
 
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import Gdk, Gio, GLib, Gtk
 
 from ... import shortcuts
+from ...dbus import session_bus as _session_bus
 from ...i18n import _
 
 
@@ -57,6 +58,19 @@ def gdk_mods(state) -> frozenset:
     return frozenset(mods)
 
 
+def block_global_shortcuts(block: bool) -> None:
+    """Suspend KDE's global shortcuts while a shortcut is captured, so that
+    pressing one (Insert starts dictation) reaches the window instead.
+    Best effort: without kglobalaccel there is nothing to block."""
+    try:
+        _session_bus().call(
+            "org.kde.kglobalaccel", "/kglobalaccel", "org.kde.KGlobalAccel",
+            "blockGlobalShortcuts", GLib.Variant("(b)", (block,)), None,
+            Gio.DBusCallFlags.NONE, 2000, None, None, None)
+    except GLib.Error:
+        pass
+
+
 class ShortcutButton(Gtk.Button):
     """Click, then press a shortcut.  Esc cancels, Backspace disables."""
 
@@ -70,6 +84,7 @@ class ShortcutButton(Gtk.Button):
         self._show()
         self.connect("clicked", self._on_clicked)
         self.connect("focus-out-event", self._on_focus_out)
+        self.connect("unmap", self._on_focus_out)       # the window was hidden
 
     @property
     def binding(self) -> str:
@@ -88,6 +103,7 @@ class ShortcutButton(Gtk.Button):
         self._listening = True
         self.set_label(_("Press a shortcut…"))
         self._handler = self.connect("key-press-event", self._on_key)
+        block_global_shortcuts(True)
         self.grab_focus()
 
     def _on_key(self, _widget, event):
@@ -96,7 +112,8 @@ class ShortcutButton(Gtk.Button):
         return True
 
     def _on_focus_out(self, *_a):
-        """Clicking elsewhere ends a capture as if Escape was pressed."""
+        """Clicking elsewhere (or hiding the window) ends a capture as if
+        Escape was pressed."""
         if self._listening:
             self._stop_listening()
             self._show()
@@ -107,11 +124,15 @@ class ShortcutButton(Gtk.Button):
         if self._handler:
             self.disconnect(self._handler)
             self._handler = 0
+        block_global_shortcuts(False)
 
     def feed(self, keyname: str, mods: frozenset) -> str:
         if not self._listening:
             return "idle"
         status, binding = shortcuts.capture(keyname, mods)
+        if status == "done" and binding in shortcuts.PASTE_CHORDS:
+            self.set_label(_("{key} pastes — press another").format(key=binding))
+            return "reject"
         if status in ("wait", "reject"):
             return status
         self._stop_listening()

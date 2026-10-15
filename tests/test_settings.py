@@ -408,30 +408,90 @@ def s9_widgets():
     from parakeet_dictation import i18n
     from parakeet_dictation.ui.settings import widgets as w
     i18n.setup("en")
-    got = []
-    b = w.ShortcutButton("Insert", got.append)
-    check("shows its binding", b.get_label() == "Insert")
-    b.clicked()
-    check("listening prompt", b.get_label() == "Press a shortcut…", b.get_label())
-    check("lone Meta keeps listening", b.feed("Super_L", frozenset({"Meta"})) == "wait")
-    check("Meta+Insert accepted", b.feed("Insert", frozenset({"Meta"})) == "done"
-          and got == ["Meta+Insert"] and b.get_label() == "Meta+Insert", str(got))
-    b.clicked()
-    check("bare letter rejected, still listening", b.feed("a", frozenset()) == "reject"
-          and b.get_label() == "Press a shortcut…")
-    check("Escape restores", b.feed("Escape", frozenset()) == "cancel" and b.get_label() == "Meta+Insert")
-    b.clicked()
-    b.feed("BackSpace", frozenset())
-    check("Backspace disables", got[-1] == "" and b.get_label() == "None", b.get_label())
-    b.clicked()
-    n = len(got)
-    b.emit("focus-out-event", Gdk.Event.new(Gdk.EventType.FOCUS_CHANGE))
-    check("focus loss cancels the capture", b.get_label() == "None" and len(got) == n
-          and b.feed("Insert", frozenset()) == "idle", b.get_label())
-    ch = w.device_choices("USB Mic", ["Built-in"])
-    check("device choices keep a missing saved mic",
-          ch == [("", "System default"), ("Built-in", "Built-in"), ("USB Mic", "USB Mic (not connected)")], str(ch))
-    check("numeric legacy value is not shown as a name", w.device_choices("7", ["A"])[-1] == ("A", "A"))
+    # Never block the real session's shortcuts from a test.
+    blocks = []
+    saved_block = w.block_global_shortcuts
+    w.block_global_shortcuts = blocks.append
+    try:
+        got = []
+        b = w.ShortcutButton("Insert", got.append)
+        check("shows its binding", b.get_label() == "Insert")
+        b.clicked()
+        check("listening prompt", b.get_label() == "Press a shortcut…", b.get_label())
+        check("lone Meta keeps listening", b.feed("Super_L", frozenset({"Meta"})) == "wait")
+        check("Meta+Insert accepted", b.feed("Insert", frozenset({"Meta"})) == "done"
+              and got == ["Meta+Insert"] and b.get_label() == "Meta+Insert", str(got))
+        b.clicked()
+        check("bare letter rejected, still listening", b.feed("a", frozenset()) == "reject"
+              and b.get_label() == "Press a shortcut…")
+        check("Escape restores", b.feed("Escape", frozenset()) == "cancel" and b.get_label() == "Meta+Insert")
+        b.clicked()
+        b.feed("BackSpace", frozenset())
+        check("Backspace disables", got[-1] == "" and b.get_label() == "None", b.get_label())
+        b.clicked()
+        n = len(got)
+        b.emit("focus-out-event", Gdk.Event.new(Gdk.EventType.FOCUS_CHANGE))
+        check("focus loss cancels the capture", b.get_label() == "None" and len(got) == n
+              and b.feed("Insert", frozenset()) == "idle", b.get_label())
+        # M8a: the app's own paste chords would be pressed by the app itself.
+        b = w.ShortcutButton("Insert", got.append)
+        for chord, mods in (("v", {"Ctrl"}), ("v", {"Ctrl", "Shift"}), ("Insert", {"Shift"})):
+            b.clicked()
+            n = len(got)
+            st = b.feed(chord, frozenset(mods))
+            check(f"M8a: {'+'.join(sorted(mods))}+{chord} refused, still listening",
+                  st == "reject" and len(got) == n and b._listening, st)
+            check("M8a: ...with a hint naming it", "paste" in b.get_label(), b.get_label())
+            b.feed("Escape", frozenset())
+        # M8b: global shortcuts are blocked for exactly the capture.
+        blocks.clear()
+        b.clicked()
+        check("M8b: capture blocks global shortcuts", blocks == [True], str(blocks))
+        b.feed("Pause", frozenset())
+        check("M8b: done unblocks", blocks == [True, False], str(blocks))
+        for end, how in (("cancel", lambda: b.feed("Escape", frozenset())),
+                         ("clear", lambda: b.feed("BackSpace", frozenset())),
+                         ("focus-out", lambda: b.emit("focus-out-event",
+                                                      Gdk.Event.new(Gdk.EventType.FOCUS_CHANGE))),
+                         ("window hide", lambda: b.emit("unmap"))):
+            blocks.clear()
+            b.clicked()
+            how()
+            check(f"M8b: {end} unblocks", blocks == [True, False] and not b._listening, str(blocks))
+        blocks.clear()
+        b.emit("unmap")
+        check("M8b: no unblock call without a capture", blocks == [], str(blocks))
+        # The D-Bus call itself: right method and argument; errors are swallowed.
+        from gi.repository import GLib
+
+        class Bus:
+            def __init__(self, fail=False): self.calls, self.fail = [], fail
+            def call(self, *a):
+                if self.fail:
+                    raise GLib.Error("no kglobalaccel")
+                self.calls.append(a)
+        saved_bus = w._session_bus
+        try:
+            bus = Bus()
+            w._session_bus = lambda: bus
+            saved_block(True)                  # the real function, against the fake bus
+            c = bus.calls[0] if bus.calls else ()
+            check("M8b: calls org.kde.KGlobalAccel.blockGlobalShortcuts(true) on /kglobalaccel",
+                  c[:4] == ("org.kde.kglobalaccel", "/kglobalaccel", "org.kde.KGlobalAccel",
+                            "blockGlobalShortcuts") and c[4].unpack() == (True,), str(c[:5]))
+            w._session_bus = lambda: Bus(fail=True)
+            saved_block(False)
+            check("M8b: a D-Bus error is swallowed", True)
+        except Exception as e:
+            check("M8b: a D-Bus error is swallowed", False, f"{type(e).__name__}: {e}")
+        finally:
+            w._session_bus = saved_bus
+        ch = w.device_choices("USB Mic", ["Built-in"])
+        check("device choices keep a missing saved mic",
+              ch == [("", "System default"), ("Built-in", "Built-in"), ("USB Mic", "USB Mic (not connected)")], str(ch))
+        check("numeric legacy value is not shown as a name", w.device_choices("7", ["A"])[-1] == ("A", "A"))
+    finally:
+        w.block_global_shortcuts = saved_block
 
 
 def s10_settings_window():
