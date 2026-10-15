@@ -123,11 +123,16 @@ def recognition(win):
     def populate():
         for child in listbox.get_children():
             listbox.remove(child)
+        descriptions = {
+            "desktop": _("Best accuracy, 25 European languages. ~639 MB download, ~2 GB RAM."),
+            "laptop": _("Lightweight, 4 languages (EN/ES/DE/FR). ~198 MB download, ~500 MB RAM."),
+            "streaming": _("True real-time streaming, English only. ~631 MB download, ~2 GB RAM."),
+        }
         for mid, data in profiles.items():
             row = Gtk.Box(spacing=12, margin=8)
             text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             name = Gtk.Label(label=data["name"], xalign=0.0)
-            meta = Gtk.Label(label=data.get("description", ""), xalign=0.0)
+            meta = Gtk.Label(label=descriptions.get(mid) or data.get("description", ""), xalign=0.0)
             meta.set_line_wrap(True)
             meta.get_style_context().add_class("dim-label")
             text.pack_start(name, False, False, 0)

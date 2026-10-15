@@ -24,6 +24,7 @@ from pathlib import Path
 from gi.repository import GLib
 
 from .config import APP_DIR, MODELS_DIR
+from .i18n import _
 
 MODELS_JSON = Path(__file__).resolve().parent / "data" / "models.json"
 
@@ -170,12 +171,13 @@ def _download_model(model_id: str, profiles_data: dict, on_progress, on_done):
                         total_mb = total / 1024 / 1024
                         GLib.idle_add(
                             on_progress,
-                            f"{fname} ({idx}/{total_files}): {mb:.0f}/{total_mb:.0f} MB",
+                            _("{name} ({idx}/{total}): {mb:.0f}/{total_mb:.0f} MB").format(
+                                name=fname, idx=idx, total=total_files, mb=mb, total_mb=total_mb),
                             frac,
                         )
                     else:
                         mb = done / 1024 / 1024
-                        GLib.idle_add(on_progress, f"{fname}: {mb:.0f} MB", -1.0)
+                        GLib.idle_add(on_progress, _("{name}: {mb:.0f} MB").format(name=fname, mb=mb), -1.0)
 
                 _download_file(info["url"], dest, _file_progress,
                                sha256=info.get("sha256"))
@@ -209,10 +211,11 @@ def _download_all_models(profiles_data: dict, on_progress, on_done):
                             frac = done / total
                             mb = done / 1024 / 1024
                             total_mb = total / 1024 / 1024
-                            GLib.idle_add(on_progress, f"{sn}: {fname} {mb:.0f}/{total_mb:.0f} MB", frac)
+                            GLib.idle_add(on_progress, _("{model}: {name} {mb:.0f}/{total_mb:.0f} MB").format(
+                                model=sn, name=fname, mb=mb, total_mb=total_mb), frac)
                         else:
                             mb = done / 1024 / 1024
-                            GLib.idle_add(on_progress, f"{sn}: {fname} {mb:.0f} MB", -1.0)
+                            GLib.idle_add(on_progress, _("{model}: {name} {mb:.0f} MB").format(model=sn, name=fname, mb=mb), -1.0)
 
                     _download_file(info["url"], dest, _file_progress,
                                    sha256=info.get("sha256"))
