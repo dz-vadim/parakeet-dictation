@@ -6,13 +6,12 @@ through a pynput listener, which only sees keys inside this app's own windows
 there; the tray and the SIGUSR1/SIGUSR2 signals are what drive those modes.
 """
 
-import re
-
 from gi.repository import Gio, GLib
 
 from .config import APP_ID, APP_NAME, AppConfig
 from .dbus import call_sync
 from .diagnostics import DIAG
+from .shortcuts import qt_key_sequence  # noqa: F401  (re-export)
 
 # ---------------------------------------------------------------------------
 # Global shortcuts via kglobalaccel
@@ -24,55 +23,6 @@ from .diagnostics import DIAG
 # which is what push-to-talk needs.  No relogin is involved — that constraint
 # belongs to hand-edited kglobalshortcutsrc entries, not to this path.
 # ---------------------------------------------------------------------------
-
-QT_MODIFIER_BITS = {
-    "shift": 0x02000000,
-    "ctrl": 0x04000000, "control": 0x04000000,
-    "alt": 0x08000000,
-    "meta": 0x10000000, "super": 0x10000000, "win": 0x10000000,
-}
-
-QT_NAMED_KEYS = {
-    "escape": 0x01000000, "tab": 0x01000001, "backtab": 0x01000002,
-    "backspace": 0x01000003, "return": 0x01000004, "enter": 0x01000005,
-    "insert": 0x01000006, "delete": 0x01000007, "pause": 0x01000008,
-    "print": 0x01000009, "sysreq": 0x0100000A, "clear": 0x0100000B,
-    "home": 0x01000010, "end": 0x01000011, "left": 0x01000012,
-    "up": 0x01000013, "right": 0x01000014, "down": 0x01000015,
-    "pageup": 0x01000016, "pagedown": 0x01000017, "capslock": 0x01000024,
-    "numlock": 0x01000025, "scrolllock": 0x01000026, "menu": 0x01000055,
-    "space": 0x20,
-}
-
-
-def qt_key_sequence(binding: str) -> int:
-    """Translate a KDE shortcut string ("Meta+Alt+D") into a Qt key int.
-
-    kglobalaccel speaks QKeySequence, not X11 keysyms: modifier bits sit in the
-    high bits (Meta 0x10000000, Alt 0x08000000, Ctrl 0x04000000, Shift
-    0x02000000) and the key code in the low ones.  Cross-check against a
-    shortcut KDE ships: Close Window reads back as 150994995 = 0x09000033 =
-    Alt+F4, and Meta+Alt+D is 0x18000044.
-    """
-    parts = [p.strip() for p in binding.split("+") if p.strip()]
-    if not parts:
-        raise ValueError("empty shortcut")
-    *mods, key = parts
-    value = 0
-    for mod in mods:
-        bit = QT_MODIFIER_BITS.get(mod.lower())
-        if bit is None:
-            raise ValueError(f"unknown modifier {mod!r}")
-        value |= bit
-    low = key.lower()
-    if low in QT_NAMED_KEYS:
-        return value | QT_NAMED_KEYS[low]
-    m = re.fullmatch(r"f(\d{1,2})", low)
-    if m and 1 <= int(m.group(1)) <= 35:
-        return value | (0x01000030 + int(m.group(1)) - 1)
-    if len(key) == 1:
-        return value | ord(key.upper())
-    raise ValueError(f"unknown key {key!r}")
 
 
 class KGlobalAccelHotkey:
