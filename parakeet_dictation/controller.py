@@ -10,6 +10,7 @@ from . import shortcuts
 from .config import AppConfig
 from .diagnostics import DIAG
 from .engine import ASREngine
+from .i18n import _
 from .insert import TextTyper, _WS_RE, filter_fillers
 from .models import load_model_profiles
 
@@ -37,11 +38,11 @@ def overlay_error_message(msg: str) -> str:
     """Short and actionable for the pill; the full text still goes to stderr."""
     low = msg.lower()
     if "missing model" in low or "download_models" in low:
-        return "Model files missing — open Settings › Models"
+        return _("Model files missing — open Settings › Recognition")
     if "portaudio" in low or "device" in low or "sounddevice" in low:
-        return "Microphone unavailable — check Settings › General"
+        return _("Microphone unavailable — check Settings › General")
     first = msg.strip().splitlines()[0] if msg.strip() else ""
-    return (first[:58] + "…") if len(first) > 58 else (first or "Dictation failed")
+    return (first[:58] + "…") if len(first) > 58 else (first or _("Dictation failed"))
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +361,7 @@ class DictationController:
                 DIAG.log("stop_rejected", reason="already_stopping", take=self._take_seq)
         else:
             DIAG.log("stop_rejected", reason="not_recording", take=self._take_seq)
-            self._overlay_state("error", "Nothing to stop — press and hold to dictate")
+            self._overlay_state("error", _("Nothing to stop — press and hold to dictate"))
 
     def _decide_stop(self) -> str:
         if self._gesture == GESTURE_RECORDING:
@@ -458,7 +459,7 @@ class DictationController:
             # press was ignored until the app was restarted.
             DIAG.log("take_insert_error", err=type(e).__name__, take=take)
             print(f"ERROR: insertion failed: {type(e).__name__}: {e}", file=sys.stderr)
-            self._overlay_state("error", "Insertion failed — text was not pasted")
+            self._overlay_state("error", _("Insertion failed — text was not pasted"))
             self._end_take("insert_error", reason)
         return GLib.SOURCE_REMOVE
 
@@ -690,7 +691,7 @@ class DictationController:
     def _on_error(self, msg: str):
         print(f"ERROR: {msg}", file=sys.stderr)
         if self._status_callback:
-            self._status_callback(f"Error: {msg[:60]}")
+            self._status_callback(_("Error: {message}").format(message=msg[:60]))
         rescued = False
         if self._take_chunks and self._gesture != GESTURE_IDLE:
             # The engine decodes what was captured before a microphone
@@ -711,5 +712,5 @@ class DictationController:
             self._end_take(outcome, "engine_error")
         message = overlay_error_message(msg)
         if rescued:
-            message = f"{message} — text is on the clipboard"
+            message = _("{message} — text is on the clipboard").format(message=message)
         self._overlay_state("error", message)

@@ -38,6 +38,7 @@ from types import SimpleNamespace
 from gi.repository import Gio, GLib
 
 from . import config as _config
+from .i18n import _
 from .config import DEFAULT_NO_CTRL_V_CLASSES, DEFAULT_TERMINAL_CLASSES
 from .dbus import call_sync, session_bus
 from .diagnostics import DIAG
@@ -506,7 +507,7 @@ def _report_missing(exc, fallback: str, method: str, notify=None) -> str:
     hint = _HELPER_PACKAGE.get(exe, exe)
     print(f"ERROR: {exe} not found — install {hint}.", file=sys.stderr)
     if notify:
-        notify(f"{exe} not found — install {hint}")
+        notify(_("{exe} not found — install {hint}").format(exe=exe, hint=hint))
     return exe
 
 
@@ -596,7 +597,7 @@ class TextTyper:
                 DIAG.log("insert_error", err=type(e).__name__)
                 print(f"ERROR: insertion failed: {type(e).__name__}: {e}", file=sys.stderr)
                 if self._on_failure:
-                    self._on_failure(f"Insertion failed: {type(e).__name__}")
+                    self._on_failure(_("Insertion failed: {error}").format(error=type(e).__name__))
             finally:
                 if on_done is not None:
                     try:
@@ -643,7 +644,7 @@ class TextTyper:
             DIAG.log("insert_failed", err=type(e).__name__, errno=e.errno or 0, exe=exe)
             print(f"ERROR: {exe}: {e.strerror or e}", file=sys.stderr)
             if self._on_failure:
-                self._on_failure(f"Insertion failed: {exe}: {e.strerror or e}")
+                self._on_failure(_("Insertion failed: {error}").format(error=f"{exe}: {e.strerror or e}"))
 
     def _clipboard_paste(self, text: str, target=None):
         """Stage *text* on both selections, press the chord, restore later."""
@@ -692,7 +693,7 @@ class TextTyper:
                 DIAG.log("insert_failed", err="TimeoutExpired", exe="wl-copy")
                 print("ERROR: wl-copy timed out", file=sys.stderr)
                 if self._on_failure:
-                    self._on_failure("Insertion failed: wl-copy timed out")
+                    self._on_failure(_("Insertion failed: wl-copy timed out"))
                 return
             time.sleep(STAGE_SETTLE_S)
             ok = self._paste(chord, detect, cls)
@@ -703,7 +704,7 @@ class TextTyper:
                 self._clip_saved = None
                 DIAG.log("paste_failed", target=cls or "unknown", chars=len(text))
                 if self._on_failure:
-                    self._on_failure("Text is on the clipboard — press Ctrl+V")
+                    self._on_failure(_("Text is on the clipboard — press Ctrl+V"))
                 return
             if not self._keep_on_clipboard:
                 self._clip_restore_due = time.monotonic() + RESTORE_AFTER_S

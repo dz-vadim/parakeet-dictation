@@ -93,7 +93,7 @@ def general(win):
 
     system = Section(_("System"))
     system.row(_("Interface language:"), win.bind_combo("ui_language", [
-        ("system", _("System default")), ("uk", "Українська"), ("en", "English")]),
+        ("system", _("Same as the system")), ("uk", "Українська"), ("en", "English")]),
         _("Takes effect after the app restarts."))
     login = Gtk.CheckButton(label=_("Start at login"))
     login.set_active(win.autostart_wanted)

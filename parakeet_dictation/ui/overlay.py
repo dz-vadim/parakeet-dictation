@@ -10,6 +10,7 @@ from gi.repository import Gdk, GLib, Gtk
 from ..config import APP_NAME, AppConfig
 from ..diagnostics import DIAG
 from ..insert import _WS_RE
+from ..i18n import _
 
 PREPARING_GRACE_MS = 600
 
@@ -938,7 +939,7 @@ class PillOverlay:
     def _draw_preparing(self, cr, height):
         cy = height / 2
         self._spinner(cr, 20, cy, 6.5)
-        self._text(cr, 36, cy + 4, "Preparing engine…")
+        self._text(cr, 36, cy + 4, _("Preparing engine…"))
 
     def _draw_success(self, cr, width, height):
         cy = height / 2
@@ -971,7 +972,7 @@ class PillOverlay:
     # past that is the end ellipsised.
 
     def _error_text(self) -> str:
-        return self._message or "Dictation failed"
+        return self._message or _("Dictation failed")
 
     def _error_ms(self, message: str) -> int:
         """How long an error stays up: long enough to read it."""

@@ -817,9 +817,9 @@ def defect8_model_hint():
     check("the hint names the module that exists",
           "python -m parakeet_dictation.models desktop" in msg, msg.splitlines()[-1:])
     check("the deleted script is not mentioned", "download_models.py" not in msg)
-    check("the pill still shows the Settings › Models hint",
+    check("the pill still shows the Settings › Recognition hint",
           da_controller.overlay_error_message(msg)
-          == "Model files missing — open Settings › Models",
+          == "Model files missing — open Settings › Recognition",
           da_controller.overlay_error_message(msg))
     proc = subprocess.run([sys.executable, "-m", "parakeet_dictation.models",
                            "no-such-profile"], cwd=HERE.parent, capture_output=True,

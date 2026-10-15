@@ -66,9 +66,9 @@ def s2_i18n():
     from parakeet_dictation import i18n
     got = i18n.setup("uk")
     check("uk loads", got == "uk", got)
-    check("a known string is translated", i18n._("Settings") == "Налаштування", i18n._("Settings"))
+    check("a known string is translated", i18n._("Start Dictation") == "Почати диктування", i18n._("Start Dictation"))
     got = i18n.setup("en")
-    check("en loads", got == "en" and i18n._("Settings") == "Settings")
+    check("en loads", got == "en" and i18n._("Start Dictation") == "Start Dictation")
     saved = {k: os.environ.get(k) for k in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG")}
     try:
         for k in saved:
@@ -77,7 +77,7 @@ def s2_i18n():
         check("system follows LANG=uk_UA", i18n.setup("system") == "uk")
         os.environ["LANG"] = "de_DE.UTF-8"
         check("system with no catalogue falls back to en", i18n.setup("system") == "en"
-              and i18n._("Settings") == "Settings")
+              and i18n._("Start Dictation") == "Start Dictation")
     finally:
         for k, v in saved.items():
             if v is None:
@@ -611,10 +611,30 @@ def s11_tray():
         tmp.cleanup()
 
 
+def s12_catalogue_complete():
+    print("\n[12] Ukrainian catalogue covers every _() string")
+    import re, subprocess, tempfile
+    root = HERE.parent
+    with tempfile.NamedTemporaryFile(suffix=".pot") as pot:
+        files = sorted(str(p) for p in (root / "parakeet_dictation").rglob("*.py"))
+        subprocess.run(["xgettext", "--language=Python", "--keyword=_", "--keyword=ngettext:1,2",
+                        "--from-code=UTF-8", "-o", pot.name, *files], check=True)
+        ids = set(re.findall(r'^msgid "(.+)"$', Path(pot.name).read_text(), re.M))
+    po = (root / "parakeet_dictation/locale/uk/LC_MESSAGES/parakeet-dictation.po").read_text()
+    # msgstr may be wrapped over continuation lines by msgmerge.
+    have = re.findall(r'^msgid "(.+)"\nmsgstr "(.*)"((?:\n".*")*)$', po, re.M)
+    translated = {m for m, first, rest in have if first or rest}
+    missing = sorted(ids - translated)
+    check("no untranslated strings", not missing, "; ".join(missing[:8]))
+    check("more than 100 strings", len(ids) > 100, str(len(ids)))
+    check("no obsolete entries left", "\n#~ " not in po)
+
+
 SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions,
             5: s5_controller_take_kind, 6: s6_menu_model,
             7: s7_settings_draft, 8: s8_autostart, 9: s9_widgets,
-            10: s10_settings_window, 11: s11_tray}
+            10: s10_settings_window, 11: s11_tray,
+            12: s12_catalogue_complete}
 
 
 def main(argv):

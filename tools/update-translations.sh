@@ -15,6 +15,7 @@ if [ -f "$po" ]; then
 else
     msginit --no-translator --locale=uk_UA.UTF-8 --input="$pot" --output-file="$po"
 fi
+msgattrib --no-obsolete --output-file="$po" "$po"
 msgfmt --check --output-file="${po%.po}.mo" "$po"
 untranslated=$(msgattrib --untranslated "$po" | grep -c '^msgid ' || true)
 echo "untranslated entries (incl. header): $untranslated"

@@ -14,6 +14,7 @@ from .audio import (SAMPLE_RATE, TenVadDetector, _BlockCoalescer, normalize_for_
                     play_beep_pause, play_beep_start, play_beep_stop, resolve_audio_device)
 from .config import MODELS_DIR, AppConfig
 from .diagnostics import DIAG
+from .i18n import _
 
 # Offline (VAD-segmented) path sizing.
 MIN_SEGMENT_SAMPLES = 4800   # 0.3 s — shorter segments decode to garbage
@@ -326,12 +327,12 @@ class ASREngine:
             self._paused = False
             self._pause_event.set()
             play_beep_pause(self._config.beep_volume)
-            GLib.idle_add(self._on_partial, "Resumed")
+            GLib.idle_add(self._on_partial, _("Resumed"))
         else:
             self._paused = True
             self._pause_event.clear()
             play_beep_pause(self._config.beep_volume)
-            GLib.idle_add(self._on_partial, "Paused")
+            GLib.idle_add(self._on_partial, _("Paused"))
 
     def _publish_level(self, audio, speech: bool):
         """Feed the overlay meter from the samples already being captured.
@@ -511,7 +512,7 @@ class ASREngine:
                     if speech and not was_speech:
                         # On the edge only: the same caption ten times a
                         # second is ten idle callbacks the loop has to run.
-                        GLib.idle_add(self._on_partial, "Listening...")
+                        GLib.idle_add(self._on_partial, _("Listening…"))
                     was_speech = speech
 
                     drain("silence")
@@ -585,7 +586,7 @@ class ASREngine:
         segment order, and GLib.idle_add preserves that order on delivery.
         """
         try:
-            recognizer, _ = self._acquire_offline_recognizer()
+            recognizer, _unused = self._acquire_offline_recognizer()
         except Exception as e:
             GLib.idle_add(self._on_error, str(e))
             # Keep draining so the capture thread never blocks on a full queue.
@@ -691,7 +692,7 @@ class ASREngine:
         try:
             # Blocks behind the model load on a cold first take; the take may
             # be over by the time it returns, hence the check straight after.
-            recognizer, _ = self._acquire_offline_recognizer()
+            recognizer, _unused = self._acquire_offline_recognizer()
         except Exception:
             return          # a failed preview must never take the take down
         if stop_event.is_set():
@@ -763,7 +764,7 @@ class ASREngine:
             GLib.idle_add(self._on_preview, text)
 
     def _run_streaming(self, stop_event):
-        recognizer, _ = self._acquire_online_recognizer()
+        recognizer, _unused = self._acquire_online_recognizer()
         with INFERENCE_LOCK:
             stream = recognizer.create_stream()
         chunk_duration = 0.1
