@@ -1,6 +1,6 @@
 pkgbase = parakeet-dictation-git
 	pkgdesc = On-device push-to-talk voice dictation for KDE Plasma Wayland (Parakeet TDT via sherpa-onnx, TEN VAD)
-	pkgver = 2.0.0.r91.gd2ba053
+	pkgver = 2.0.0.r99.g7a69bb2
 	pkgrel = 1
 	url = https://github.com/dz-vadim/parakeet-dictation
 	install = parakeet-dictation.install

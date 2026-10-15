@@ -6,8 +6,8 @@
 #   no pip, no network access in build() or package().
 #     python-sherpa-onnx   AUR, split package "sherpa-onnx" (built from source
 #                          against extra/onnxruntime-cpu and the system Python)
-#     python-ten-vad       satisfied by python-ten-vad-bin (see packaging/deps/,
-#                          not on the AUR yet)
+#     python-ten-vad       AUR, provided by python-ten-vad-bin (source in
+#                          packaging/deps/ of the upstream repository)
 #     python-sounddevice   AUR
 #     python-pynput        AUR
 #     everything else      official repositories
@@ -20,7 +20,7 @@
 
 pkgname=parakeet-dictation-git
 _pkgname=parakeet-dictation
-pkgver=2.0.0.r91.gd2ba053
+pkgver=2.0.0.r99.g7a69bb2
 pkgrel=1
 pkgdesc="On-device push-to-talk voice dictation for KDE Plasma Wayland (Parakeet TDT via sherpa-onnx, TEN VAD)"
 arch=('any')
