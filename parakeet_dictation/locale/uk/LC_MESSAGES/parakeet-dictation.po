@@ -60,3 +60,9 @@ msgstr "готово · утримуйте {key}, щоб говорити"
 
 msgid "ready"
 msgstr "готово"
+
+msgid "None"
+msgstr "Немає"
+
+msgid "Press a shortcut…"
+msgstr "Натисніть комбінацію…"

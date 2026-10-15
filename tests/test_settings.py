@@ -385,9 +385,38 @@ def s8_autostart():
                 os.environ["XDG_CONFIG_HOME"] = saved
 
 
+def s9_widgets():
+    print("\n[9] widgets: shortcut button state machine, device choices (GTK)")
+    import gi
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gtk
+    from parakeet_dictation import i18n
+    from parakeet_dictation.ui.settings import widgets as w
+    i18n.setup("en")
+    got = []
+    b = w.ShortcutButton("Insert", got.append)
+    check("shows its binding", b.get_label() == "Insert")
+    b.clicked()
+    check("listening prompt", b.get_label() == "Press a shortcut…", b.get_label())
+    check("lone Meta keeps listening", b.feed("Super_L", frozenset({"Meta"})) == "wait")
+    check("Meta+Insert accepted", b.feed("Insert", frozenset({"Meta"})) == "done"
+          and got == ["Meta+Insert"] and b.get_label() == "Meta+Insert", str(got))
+    b.clicked()
+    check("bare letter rejected, still listening", b.feed("a", frozenset()) == "reject"
+          and b.get_label() == "Press a shortcut…")
+    check("Escape restores", b.feed("Escape", frozenset()) == "cancel" and b.get_label() == "Meta+Insert")
+    b.clicked()
+    b.feed("BackSpace", frozenset())
+    check("Backspace disables", got[-1] == "" and b.get_label() == "None", b.get_label())
+    ch = w.device_choices("USB Mic", ["Built-in"])
+    check("device choices keep a missing saved mic",
+          ch == [("", "System default"), ("Built-in", "Built-in"), ("USB Mic", "USB Mic (not connected)")], str(ch))
+    check("numeric legacy value is not shown as a name", w.device_choices("7", ["A"])[-1] == ("A", "A"))
+
+
 SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions,
             5: s5_controller_take_kind, 6: s6_menu_model,
-            7: s7_settings_draft, 8: s8_autostart}
+            7: s7_settings_draft, 8: s8_autostart, 9: s9_widgets}
 
 
 def main(argv):
