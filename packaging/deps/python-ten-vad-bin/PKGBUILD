@@ -17,7 +17,7 @@ url="https://github.com/TEN-framework/ten-vad"
 # Apache-2.0 with additional conditions from Agora, see the installed LICENSE.
 license=('LicenseRef-TEN-VAD')
 depends=('python' 'python-numpy' 'libc++')
-makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+makedepends=('python-build' 'python-installer' 'python-setuptools')
 provides=('python-ten-vad')
 conflicts=('python-ten-vad')
 options=('!strip' '!debug')

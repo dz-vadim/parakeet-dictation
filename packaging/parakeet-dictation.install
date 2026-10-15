@@ -25,5 +25,5 @@ MSG
 }
 
 post_upgrade() {
-  post_install
+  echo "==> parakeet-dictation: restart the app to run the new version (setup notes: /usr/share/doc/parakeet-dictation/README.md)"
 }

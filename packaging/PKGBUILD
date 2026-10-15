@@ -40,7 +40,6 @@ depends=(
   'gtk3'
   'libayatana-appindicator'
   'gtk-layer-shell'
-  'portaudio'
   'wl-clipboard'
   'ydotool'
   'xdg-desktop-portal-kde'
@@ -51,7 +50,7 @@ optdepends=(
   'xdotool: last-resort chord transport, reaches XWayland windows only'
   'wtype: "wtype" typer on compositors with the virtual-keyboard protocol (GNOME, Sway)'
 )
-makedepends=('git' 'python-build' 'python-installer' 'python-wheel' 'python-setuptools')
+makedepends=('git' 'python-build' 'python-installer' 'python-setuptools')
 provides=("$_pkgname")
 conflicts=("$_pkgname")
 install="$_pkgname.install"
@@ -79,6 +78,8 @@ package() {
   python -m installer --destdir="$pkgdir" dist/*.whl
   install -Dm755 packaging/parakeet-dictation-models -t "$pkgdir/usr/bin"
   install -Dm644 packaging/parakeet-dictation.desktop -t "$pkgdir/usr/share/applications"
+  install -Dm644 parakeet_dictation/data/icons/parakeet-mic-idle.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/$_pkgname.svg"
   install -Dm644 README.md -t "$pkgdir/usr/share/doc/$_pkgname"
-  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$_pkgname"
+  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
 }
