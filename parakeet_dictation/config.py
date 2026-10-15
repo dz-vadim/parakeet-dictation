@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from . import shortcuts
+
 # ---------------------------------------------------------------------------
 # Paths & constants
 # ---------------------------------------------------------------------------
@@ -92,11 +94,6 @@ class AppConfig:
     #   "wtype" (needs virtual-keyboard protocol), "ydotool" (needs daemon+uinput)
     typer: str = "clipboard"
 
-    # Hotkey mode: "hold" (true push-to-talk: dictate only while the key is
-    # down — what this app is built and tested for), "toggle" (one key) or
-    # "start_stop" (separate keys)
-    hotkey_mode: str = "hold"
-
     # Night mode — suppress beeps between these hours (24h format)
     night_mode: bool = True
     night_start: int = 22  # 10 PM
@@ -156,27 +153,22 @@ class AppConfig:
     # them all and inserts once when the take ends: one clipboard write, one
     # paste and one undo step for the whole take, with the live preview
     # showing the text meanwhile.  "per_segment" inserts each one as it
-    # decodes — but NOT under hold mode: a paste chord pressed while the
-    # push-to-talk key is held makes kglobalaccel report that key released
-    # (Ctrl, V, Ctrl+V and Shift+Insert alone each did, on this Plasma), which
-    # ends the take mid-sentence.  enforce() refuses that combination.
+    # decodes — but not while the push-to-talk key is held: a paste chord
+    # pressed then makes kglobalaccel report that key released (Ctrl, V,
+    # Ctrl+V and Shift+Insert alone each did, on this Plasma), which ends the
+    # take mid-sentence, so hold takes always insert at the end.
     insert_mode: str = "end_of_take"
 
     # Structured diagnostics log (never contains transcripts or device names)
     diagnostics: bool = True
 
-    # Hotkey bindings (pynput format, e.g. "<ctrl>+0", "<alt>+d")
-    hotkey_toggle: str = "<ctrl>+0"
-    hotkey_start: str = "<ctrl>+9"
-    hotkey_stop: str = "<ctrl>+8"
-    hotkey_pause: str = "<ctrl>+<alt>+0"
-
-    # Push-to-talk binding, in KDE/Qt shortcut syntax rather than pynput's.
-    # Hold mode registers this with kglobalaccel directly (see
-    # KGlobalAccelHotkey) because that is the only route that reports the key
-    # coming back UP.  Meta+Z was verified free on this Plasma; Meta+Alt+D
-    # collided with a leftover .desktop shortcut.
-    hotkey_hold: str = "Meta+Z"
+    # Two kglobalaccel actions (hotkeys.KGlobalAccelHotkey), KDE notation.
+    # A bare key for push-to-talk: no modifier can still be held when the
+    # paste chord goes out.  "" disables an action.
+    hotkey_hold: str = "Insert"
+    hotkey_toggle: str = "Meta+Insert"
+    # Interface language: "system" follows the locale; "uk"/"en" force it.
+    ui_language: str = "system"
 
     # Pill overlay — compact always-visible-while-active status capsule
     overlay: bool = True
@@ -239,11 +231,6 @@ class AppConfig:
     def enforce(self, log=None) -> list:
         """Apply the invariants a config must satisfy to run; returns the keys
         it changed.  Reported like load() reports: stderr, plus `log`.
-
-        hold + per_segment is not a preference but a broken state on KWin
-        (see `insert_mode`): the combination is forced to end_of_take here,
-        on load, in the controller and on every settings save, so it cannot
-        run whichever way the config object was made.
         """
         report = _reporter(log)
         forced = []
@@ -275,20 +262,27 @@ class AppConfig:
                 setattr(self, key, clamped)
                 forced.append(key)
                 report("config_forced", key=key, value=clamped, reason="clamped")
-        if self.hotkey_mode == "hold" and self.insert_mode != "end_of_take":
-            self.insert_mode = "end_of_take"
-            forced.append("insert_mode")
-            report("config_forced", key="insert_mode", value="end_of_take",
-                   reason="hold_mode")
-        for key in ("hotkey_toggle", "hotkey_start", "hotkey_stop", "hotkey_pause"):
+        for key in ("hotkey_hold", "hotkey_toggle"):
             value = getattr(self, key)
-            if key == "hotkey_pause" and value == "":
-                continue           # an empty pause binding means "none"
-            if not _pynput_binding_ok(value):
+            if not shortcuts.is_valid(value):
                 setattr(self, key, defaults[key].default)
                 forced.append(key)
                 report("config_forced", key=key, value=defaults[key].default,
                        reason="unparseable_binding")
+            elif value:
+                # One spelling per shortcut ("super+insert" -> "Meta+Insert"),
+                # so equality checks and KDE's read-back agree.
+                canonical = shortcuts.binding_from_qt(shortcuts.qt_key_sequence(value))
+                if canonical and canonical != value:
+                    setattr(self, key, canonical)
+                    forced.append(key)
+                    report("config_forced", key=key, value=canonical, reason="canonical")
+        if self.hotkey_toggle and self.hotkey_toggle == self.hotkey_hold:
+            default = defaults["hotkey_toggle"].default
+            self.hotkey_toggle = "" if default == self.hotkey_hold else default
+            forced.append("hotkey_toggle")
+            report("config_forced", key="hotkey_toggle", value=self.hotkey_toggle,
+                   reason="duplicate_binding")
         return forced
 
     @staticmethod
@@ -327,6 +321,7 @@ class AppConfig:
                    backup=backup.name if backup else "failed",
                    detail=str(e)[:80])
             return AppConfig()
+        data = _migrate(data, report)
         kwargs = {}
         for key, value in data.items():
             field_ = AppConfig.__dataclass_fields__.get(key)
@@ -372,7 +367,7 @@ def _coerce(field_type, value):
 # What enforce() accepts.  Anything else is reset to the field's default.
 _CHORDS = ("ctrl+v", "ctrl+shift+v", "shift+insert")
 _ENUMS = {
-    "hotkey_mode": ("hold", "toggle", "start_stop"),
+    "ui_language": ("system", "uk", "en"),
     "insert_mode": ("end_of_take", "per_segment"),
     "overlay_position": ("bottom", "top"),
     "paste_transport": ("auto", "portal", "ydotool"),
@@ -399,21 +394,24 @@ _CLAMPS = {
 }
 
 
-def _pynput_binding_ok(binding) -> bool:
-    """Whether pynput can parse `binding` (its GlobalHotKeys raises on one it
-    cannot).  True when pynput is not importable: nothing to check against."""
-    if not isinstance(binding, str):
-        return False
-    try:
-        from pynput import keyboard
-        parse = keyboard.HotKey.parse
-    except Exception:          # no pynput, or no backend for this session
-        return True
-    try:
-        parse(binding)
-    except ValueError:
-        return False
-    return True
+_DEAD_KEYS = ("hotkey_mode", "hotkey_start", "hotkey_stop", "hotkey_pause")
+
+
+def _migrate(data: dict, report) -> dict:
+    """Bring a pre-2026-10-15 config to the two-shortcut model."""
+    data = dict(data)
+    for key in _DEAD_KEYS:
+        if key in data:
+            data.pop(key)
+            report("config_migrated", key=key, reason="removed")
+    toggle = data.get("hotkey_toggle")
+    if isinstance(toggle, str) and "<" in toggle:          # pynput syntax
+        data.pop("hotkey_toggle")
+        report("config_migrated", key="hotkey_toggle", reason="pynput_syntax")
+    if data.get("hotkey_hold") == "Meta+Z":                 # the old default
+        data["hotkey_hold"] = "Insert"
+        report("config_migrated", key="hotkey_hold", reason="old_default")
+    return data
 
 
 def _back_up_broken(path: Path):

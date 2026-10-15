@@ -186,53 +186,20 @@ class HotkeyManager:
         self._on_pause = on_pause
         self._on_hold_press = on_hold_press or (lambda: None)
         self._on_hold_release = on_hold_release or (lambda: None)
-        self._listener = None
         self._hold = None
 
     def start(self) -> str:
-        """Bind the configured hotkeys.  Returns "" or a problem to show.
+        """Bind push-to-talk.  Returns "" or a problem to show.
 
-        Only hold mode goes through kglobalaccel; the other modes keep the
-        pynput listener plus the SIGUSR1 path they have always used.
+        Interim: the pynput bindings are gone with their config keys; the
+        start/stop shortcut is registered with kglobalaccel in the next step.
         """
-        status = ""
-        if self._config.hotkey_mode == "hold":
-            status = self._start_hold()
-
-        from pynput import keyboard
-        bindings = {}
-        if self._config.hotkey_mode == "toggle":
-            bindings[self._config.hotkey_toggle] = lambda: GLib.idle_add(self._on_toggle)
-        elif self._config.hotkey_mode == "start_stop":
-            bindings[self._config.hotkey_start] = lambda: GLib.idle_add(self._on_start)
-            bindings[self._config.hotkey_stop] = lambda: GLib.idle_add(self._on_stop)
-
-        if self._config.hotkey_pause:
-            bindings[self._config.hotkey_pause] = lambda: GLib.idle_add(self._on_pause)
-
-        # GlobalHotKeys raises ValueError on the first binding it cannot
-        # parse ("Meta+Z" typed into a pynput field), which used to take the
-        # whole app down at every launch.  A bad one is dropped and named.
-        bad = []
-        for binding in list(bindings):
-            try:
-                keyboard.HotKey.parse(binding)
-            except ValueError:
-                bad.append(binding)
-                del bindings[binding]
-        if bad:
-            DIAG.log("hotkey_invalid", count=len(bad))
-            problem = (f"{', '.join(bad)} is not a valid shortcut — "
-                       f"set it again in Settings")
-            status = f"{status}; {problem}" if status else problem
-
-        self._listener = keyboard.GlobalHotKeys(bindings)
-        self._listener.daemon = True
-        self._listener.start()
-        return status
+        return self._start_hold()
 
     def _start_hold(self) -> str:
         binding = self._config.hotkey_hold
+        if not binding:
+            return ""
         self._hold = KGlobalAccelHotkey(binding, self._on_hold_press,
                                         self._on_hold_release)
         try:
@@ -251,9 +218,6 @@ class HotkeyManager:
         if self._hold:
             self._hold.unregister()
             self._hold = None
-        if self._listener:
-            self._listener.stop()
-            self._listener = None
 
     def rebuild(self, config: AppConfig) -> str:
         self._config = config

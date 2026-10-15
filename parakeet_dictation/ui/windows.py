@@ -1,69 +1,16 @@
-"""Main window, settings dialog, first-run welcome dialog, hotkey capture button."""
+"""Main window, settings dialog, first-run welcome dialog."""
 
 import sys
 
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import GLib, Gtk
 
 from .. import audio
 from ..audio import list_input_devices
 from ..config import APP_NAME, AppConfig
 from ..controller import DictationController
-from ..hotkeys import HotkeyManager, qt_key_sequence
+from ..hotkeys import HotkeyManager
+from ..shortcuts import is_valid
 from ..models import _download_all_models, _download_model, _is_model_downloaded
-
-# ---------------------------------------------------------------------------
-# Hotkey capture widget
-# ---------------------------------------------------------------------------
-
-class HotkeyCaptureButton(Gtk.Button):
-    def __init__(self, current_binding: str):
-        super().__init__(label=self._display(current_binding))
-        self._binding = current_binding
-        self._capturing = False
-        self._key_handler = None
-        self.connect("clicked", self._on_clicked)
-
-    @property
-    def binding(self) -> str:
-        return self._binding
-
-    @staticmethod
-    def _display(binding: str) -> str:
-        return binding.replace("<", "").replace(">", "").replace("+", " + ").title()
-
-    def _on_clicked(self, _btn):
-        if self._capturing:
-            return
-        self._capturing = True
-        self.set_label("Press a key combo...")
-        self._key_handler = self.get_toplevel().connect("key-press-event", self._on_key)
-
-    def _on_key(self, _widget, event):
-        if not self._capturing:
-            return False
-        self._capturing = False
-        self.get_toplevel().disconnect(self._key_handler)
-
-        parts = []
-        if event.state & Gdk.ModifierType.CONTROL_MASK:
-            parts.append("<ctrl>")
-        if event.state & Gdk.ModifierType.MOD1_MASK:
-            parts.append("<alt>")
-        if event.state & Gdk.ModifierType.SHIFT_MASK:
-            parts.append("<shift>")
-
-        keyname = Gdk.keyval_name(event.keyval).lower()
-        if keyname in ("control_l", "control_r", "alt_l", "alt_r",
-                       "shift_l", "shift_r", "super_l", "super_r",
-                       "meta_l", "meta_r"):
-            self.set_label(self._display(self._binding))
-            return True
-
-        parts.append(keyname)
-        self._binding = "+".join(parts)
-        self.set_label(self._display(self._binding))
-        return True
-
 
 # ---------------------------------------------------------------------------
 # Settings dialog (tabbed: Models, Hotkeys, About)
@@ -401,66 +348,24 @@ class SettingsDialog(Gtk.Dialog):
         box.set_margin_top(12)
         box.set_margin_bottom(12)
 
-        # Mode
-        self._mode_toggle = Gtk.RadioButton.new_with_label(
-            None, "Toggle (one key starts and stops)")
-        self._mode_startstop = Gtk.RadioButton.new_with_label_from_widget(
-            self._mode_toggle, "Start/Stop (separate keys)")
-        self._mode_hold = Gtk.RadioButton.new_with_label_from_widget(
-            self._mode_toggle, "Push-to-talk (dictate only while the key is held)")
-        if self._config.hotkey_mode == "start_stop":
-            self._mode_startstop.set_active(True)
-        elif self._config.hotkey_mode == "hold":
-            self._mode_hold.set_active(True)
-        # Fires on both the way in and the way out of hold mode.
-        self._mode_hold.connect("toggled", self._reflect_hold_mode)
-        box.pack_start(self._mode_toggle, False, False, 0)
-        box.pack_start(self._mode_startstop, False, False, 4)
-        box.pack_start(self._mode_hold, False, False, 4)
-
-        hold_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        hold_box.set_margin_start(24)
-        hold_box.pack_start(Gtk.Label(label="Hold key:", halign=Gtk.Align.END),
-                            False, False, 0)
-        self._hold_entry = Gtk.Entry()
-        self._hold_entry.set_text(self._config.hotkey_hold)
-        self._hold_entry.set_width_chars(16)
-        self._hold_entry.set_tooltip_text(
-            "KDE shortcut syntax, e.g. Meta+Alt+D.  Push-to-talk registers "
-            "this with kglobalaccel itself, which is the only route that "
-            "reports the key being released.")
-        hold_box.pack_start(self._hold_entry, False, False, 0)
-        self._hold_hint = Gtk.Label()
-        self._hold_hint.get_style_context().add_class("dim-label")
-        hold_box.pack_start(self._hold_hint, False, False, 0)
-        box.pack_start(hold_box, False, False, 0)
-
-        # Bindings
-        hint = Gtk.Label(label="Click a button, then press your desired key combo.")
-        hint.set_halign(Gtk.Align.START)
-        hint.set_margin_top(8)
-        box.pack_start(hint, False, False, 0)
-
+        # Two kglobalaccel actions, KDE shortcut syntax ("" disables one).
+        # The capture-based editor arrives with the new settings window.
         grid = Gtk.Grid(column_spacing=12, row_spacing=8)
-        grid.set_margin_top(4)
-
-        grid.attach(Gtk.Label(label="Toggle:", halign=Gtk.Align.END), 0, 0, 1, 1)
-        self._hk_toggle = HotkeyCaptureButton(self._config.hotkey_toggle)
-        grid.attach(self._hk_toggle, 1, 0, 1, 1)
-
-        grid.attach(Gtk.Label(label="Start:", halign=Gtk.Align.END), 0, 1, 1, 1)
-        self._hk_start = HotkeyCaptureButton(self._config.hotkey_start)
-        grid.attach(self._hk_start, 1, 1, 1, 1)
-
-        grid.attach(Gtk.Label(label="Stop:", halign=Gtk.Align.END), 0, 2, 1, 1)
-        self._hk_stop = HotkeyCaptureButton(self._config.hotkey_stop)
-        grid.attach(self._hk_stop, 1, 2, 1, 1)
-
-        grid.attach(Gtk.Label(label="Pause:", halign=Gtk.Align.END), 0, 3, 1, 1)
-        self._hk_pause = HotkeyCaptureButton(self._config.hotkey_pause)
-        grid.attach(self._hk_pause, 1, 3, 1, 1)
-
+        self._hotkey_entries = {}
+        for row, (key, label) in enumerate((("hotkey_hold", "Hold to talk:"),
+                                            ("hotkey_toggle", "Start / stop:"))):
+            grid.attach(Gtk.Label(label=label, halign=Gtk.Align.END), 0, row, 1, 1)
+            entry = Gtk.Entry()
+            entry.set_text(getattr(self._config, key))
+            entry.set_width_chars(16)
+            entry.set_tooltip_text("KDE shortcut syntax, e.g. Insert or Meta+Alt+D; "
+                                   "empty disables it.")
+            grid.attach(entry, 1, row, 1, 1)
+            self._hotkey_entries[key] = entry
         box.pack_start(grid, False, False, 0)
+        self._hotkey_hint = Gtk.Label()
+        self._hotkey_hint.get_style_context().add_class("dim-label")
+        box.pack_start(self._hotkey_hint, False, False, 0)
 
         # Save
         save_btn = Gtk.Button(label="Save Hotkeys")
@@ -472,26 +377,17 @@ class SettingsDialog(Gtk.Dialog):
         return box
 
     def _save_hotkeys(self, _btn):
-        if self._mode_hold.get_active():
-            self._config.hotkey_mode = "hold"
-        elif self._mode_startstop.get_active():
-            self._config.hotkey_mode = "start_stop"
-        else:
-            self._config.hotkey_mode = "toggle"
-        binding = self._hold_entry.get_text().strip()
-        try:
-            qt_key_sequence(binding)
-            self._config.hotkey_hold = binding
-            self._hold_hint.set_markup("")
-        except ValueError as e:
-            # Keep the last working binding rather than registering nothing.
-            self._hold_hint.set_markup(
-                f"<small>{GLib.markup_escape_text(str(e))}</small>")
-            self._hold_entry.set_text(self._config.hotkey_hold)
-        self._config.hotkey_toggle = self._hk_toggle.binding
-        self._config.hotkey_start = self._hk_start.binding
-        self._config.hotkey_stop = self._hk_stop.binding
-        self._config.hotkey_pause = self._hk_pause.binding
+        problems = []
+        for key, entry in self._hotkey_entries.items():
+            binding = entry.get_text().strip()
+            if is_valid(binding):
+                setattr(self._config, key, binding)
+            else:
+                # Keep the last working binding rather than registering nothing.
+                problems.append(f"{binding!r} is not a shortcut")
+                entry.set_text(getattr(self._config, key))
+        self._hotkey_hint.set_markup(
+            f"<small>{GLib.markup_escape_text('; '.join(problems))}</small>")
         if self._on_save:
             self._on_save(self._config)
 
@@ -538,8 +434,8 @@ class SettingsDialog(Gtk.Dialog):
             if self._config.insert_mode in ("per_segment", "end_of_take")
             else "per_segment")
         hbox_ins.pack_start(self._insert_mode_combo, False, False, 0)
+        self._insert_mode_combo.set_tooltip_text(self.INSERT_MODE_TIP)
         box.pack_start(hbox_ins, False, False, 0)
-        self._reflect_hold_mode()
 
         sep0 = Gtk.Separator()
         sep0.set_margin_top(4)
@@ -669,23 +565,6 @@ class SettingsDialog(Gtk.Dialog):
         "Per phrase keeps the text flowing while you hold the key.  Once "
         "per take gives one paste and one undo step for the whole take, "
         "but you see nothing until you let go.")
-    INSERT_MODE_HOLD_TIP = (
-        "Push-to-talk always inserts once, when you let the key go: a paste "
-        "while the key is held makes KWin report the key released, which "
-        "would end the take mid-sentence.  The live preview shows the text "
-        "meanwhile.")
-
-    def _reflect_hold_mode(self, *_args):
-        """Pin the insert mode to end_of_take while push-to-talk is selected —
-        the same rule AppConfig.enforce applies to whatever gets saved."""
-        combo = getattr(self, "_insert_mode_combo", None)
-        if combo is None:
-            return          # the General tab is built after the Hotkeys tab
-        hold = self._mode_hold.get_active()
-        if hold:
-            combo.set_active_id("end_of_take")
-        combo.set_sensitive(not hold)
-        combo.set_tooltip_text(self.INSERT_MODE_HOLD_TIP if hold else self.INSERT_MODE_TIP)
 
     def _save_general(self, _btn):
         self._config.audio_device = self._mic_combo.get_active_id() or ""

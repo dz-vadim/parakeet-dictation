@@ -49,8 +49,7 @@ def overlay_error_message(msg: str) -> str:
 
 class DictationController:
     def __init__(self, config: AppConfig):
-        # Whatever built this config, the combination that cannot run on KWin
-        # (hold + per_segment, see AppConfig.enforce) does not get to run.
+        # Whatever built this config, its invariants hold (AppConfig.enforce).
         config.enforce(DIAG.log)
         self._config = config
         self._typer = self._make_typer(config)

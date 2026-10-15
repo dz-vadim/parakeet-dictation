@@ -175,7 +175,7 @@ def defect2_config_load():
         da_config.CONFIG_DIR, da_config.CONFIG_FILE = cfg_dir, cfg_file
         try:
             # --- a JSON typo: a trailing comma -----------------------------
-            broken = '{\n  "hotkey_hold": "Meta+Z",\n  "num_threads": 4,\n}\n'
+            broken = '{\n  "hotkey_hold": "Meta+Alt+D",\n  "num_threads": 4,\n}\n'
             cfg_file.write_text(broken)
             events = []
             try:
@@ -205,7 +205,7 @@ def defect2_config_load():
 
             # --- one key of the wrong type -----------------------------------
             cfg_file.write_text(json.dumps({
-                "hotkey_hold": "Meta+Z",
+                "hotkey_hold": "Meta+Alt+D",
                 "num_threads": "eight",        # str where an int belongs
                 "vad_threshold": 1,            # int where a float belongs: fine
                 "insert_mode": "end_of_take",
@@ -216,7 +216,7 @@ def defect2_config_load():
             with redirect_stderr(err):
                 cfg = da_config.AppConfig.load(log=lambda ev, **f: events.append((ev, f)))
             check("the good keys survive a bad neighbour",
-                  cfg.hotkey_hold == "Meta+Z" and cfg.insert_mode == "end_of_take",
+                  cfg.hotkey_hold == "Meta+Alt+D" and cfg.insert_mode == "end_of_take",
                   f"hotkey_hold={cfg.hotkey_hold!r} insert_mode={cfg.insert_mode!r}")
             check("the bad key falls back to its default",
                   cfg.num_threads == defaults.num_threads, repr(cfg.num_threads))
@@ -234,10 +234,10 @@ def defect2_config_load():
 
             # --- a valid file is untouched -----------------------------------
             events.clear()
-            cfg_file.write_text(json.dumps({"hotkey_hold": "Meta+Z", "num_threads": 2}))
+            cfg_file.write_text(json.dumps({"hotkey_hold": "Meta+Alt+D", "num_threads": 2}))
             cfg = da_config.AppConfig.load(log=lambda ev, **f: events.append((ev, f)))
             check("a valid file loads with no events",
-                  cfg.hotkey_hold == "Meta+Z" and cfg.num_threads == 2 and not events)
+                  cfg.hotkey_hold == "Meta+Alt+D" and cfg.num_threads == 2 and not events)
 
             # --- not an object at all ----------------------------------------
             cfg_file.write_text("[1, 2, 3]")
@@ -898,16 +898,16 @@ def defect10_focus_log_on_change():
 
 # ---------------------------------------------------------------------------
 # #11 Defaults match the configuration the app is built and tested for, and
-#     hold + per_segment — a broken state on KWin — cannot run.
+#     per_segment (which applies to start/stop takes) survives load, the
+#     controller and apply_config.
 # ---------------------------------------------------------------------------
 
 def defect11_hold_mode_defaults_and_guard():
-    print("\n[#11] defaults are the tested configuration; hold + per_segment cannot run")
+    print("\n[#11] defaults are the tested configuration; per_segment is kept")
     from parakeet_dictation import controller as da_controller
     da_controller.DIAG = TEST_DIAG
     cfg = da_config.AppConfig()
-    check("default hotkey_mode is hold", cfg.hotkey_mode == "hold", cfg.hotkey_mode)
-    check("default hotkey_hold is Meta+Z", cfg.hotkey_hold == "Meta+Z", cfg.hotkey_hold)
+    check("default hotkey_hold is Insert", cfg.hotkey_hold == "Insert", cfg.hotkey_hold)
     check("default insert_mode is end_of_take", cfg.insert_mode == "end_of_take",
           cfg.insert_mode)
 
@@ -922,71 +922,25 @@ def defect11_hold_mode_defaults_and_guard():
                 events.append((ev, f))
 
             da_config.CONFIG_FILE.write_text(json.dumps(
-                {"hotkey_mode": "hold", "insert_mode": "per_segment"}))
-            with redirect_stderr(io.StringIO()):
-                cfg = da_config.AppConfig.load(log=log)
-            check("hold + per_segment is forced to end_of_take on load",
-                  cfg.insert_mode == "end_of_take", cfg.insert_mode)
-            check("config_forced logged with key and reason",
-                  any(ev == "config_forced" and f.get("key") == "insert_mode"
-                      and f.get("reason") == "hold_mode" for ev, f in events), str(events))
-
-            events.clear()
-            da_config.CONFIG_FILE.write_text(json.dumps(
-                {"hotkey_mode": "toggle", "insert_mode": "per_segment",
-                 "hotkey_hold": "Meta+Alt+D"}))
+                {"insert_mode": "per_segment", "hotkey_hold": "Meta+Alt+D"}))
             cfg = da_config.AppConfig.load(log=log)
-            check("explicit values outside the forbidden combination are kept",
-                  cfg.hotkey_mode == "toggle" and cfg.insert_mode == "per_segment"
-                  and cfg.hotkey_hold == "Meta+Alt+D" and not events,
-                  f"{cfg.hotkey_mode} {cfg.insert_mode} {cfg.hotkey_hold} {events}")
+            check("explicit values are kept on load",
+                  cfg.insert_mode == "per_segment" and cfg.hotkey_hold == "Meta+Alt+D"
+                  and not events,
+                  f"{cfg.insert_mode} {cfg.hotkey_hold} {events}")
 
-            # However the config object was made, the controller will not run it.
-            before = len(diag_lines())
-            with redirect_stderr(io.StringIO()):
-                ctl = da_controller.DictationController(
-                    da_config.AppConfig(hotkey_mode="hold", insert_mode="per_segment"))
-            check("the controller forces end_of_take at construction",
-                  ctl.config.insert_mode == "end_of_take" and ctl._insert_at_end)
-            check("and logs config_forced",
-                  any("event=config_forced" in l and "key=insert_mode" in l
-                      and "reason=hold_mode" in l for l in diag_lines()[before:]))
-            before = len(diag_lines())
-            with redirect_stderr(io.StringIO()):
-                ctl.apply_config(
-                    da_config.AppConfig(hotkey_mode="hold", insert_mode="per_segment"))
+            ctl = da_controller.DictationController(
+                da_config.AppConfig(insert_mode="per_segment"))
+            check("the controller keeps per_segment after enforce()",
+                  ctl.config.insert_mode == "per_segment")
+            ctl.apply_config(da_config.AppConfig(insert_mode="per_segment"))
             on_disk = json.loads(da_config.CONFIG_FILE.read_text())
-            check("apply_config forces it too and saves the corrected file",
-                  ctl.config.insert_mode == "end_of_take"
-                  and on_disk["insert_mode"] == "end_of_take", str(on_disk.get("insert_mode")))
-            check("and logs it again",
-                  any("event=config_forced" in l for l in diag_lines()[before:]))
+            check("apply_config keeps it and saves it",
+                  ctl.config.insert_mode == "per_segment"
+                  and on_disk["insert_mode"] == "per_segment", str(on_disk.get("insert_mode")))
             ctl.shutdown()
         finally:
             da_config.CONFIG_DIR, da_config.CONFIG_FILE = saved
-
-    # The Settings dialog shows the forced value and will not offer the other.
-    from parakeet_dictation import models as da_models
-    from parakeet_dictation.ui import windows as da_windows
-    dlg = da_windows.SettingsDialog(
-        da_config.AppConfig(hotkey_mode="hold", insert_mode="per_segment"),
-        da_models.load_model_profiles(), lambda _c: None)
-    try:
-        combo = getattr(dlg, "_insert_mode_combo", None)
-        check("the Settings dialog shows end_of_take for hold mode",
-              combo is not None and combo.get_active_id() == "end_of_take",
-              combo.get_active_id() if combo is not None else "no control")
-        check("and the control is disabled while hold mode is selected",
-              combo is not None and not combo.get_sensitive())
-        dlg._mode_toggle.set_active(True)
-        check("choosing toggle mode re-enables the control",
-              combo is not None and combo.get_sensitive())
-        dlg._mode_hold.set_active(True)
-        check("choosing hold mode disables it again and selects end_of_take",
-              combo is not None and not combo.get_sensitive()
-              and combo.get_active_id() == "end_of_take")
-    finally:
-        dlg.destroy()
 
 
 # ---------------------------------------------------------------------------

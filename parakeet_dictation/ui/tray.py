@@ -57,7 +57,7 @@ class TrayIcon:
         self._toggle_item.connect("activate", self._on_toggle)
         menu.append(self._toggle_item)
 
-        self._pause_item = Gtk.MenuItem(label=f"Pause ({cfg.hotkey_pause})")
+        self._pause_item = Gtk.MenuItem(label="Pause")
         self._pause_item.connect("activate", lambda _: self._controller.pause())
         self._pause_item.set_sensitive(False)
         menu.append(self._pause_item)
@@ -154,13 +154,11 @@ class TrayIcon:
                 self._toggle_item.set_label("Resume Dictation")
                 self._indicator.set_icon_full(self._icon_name("paused"), "Paused")
             else:
-                key = cfg.hotkey_toggle if cfg.hotkey_mode == "toggle" else cfg.hotkey_stop
-                self._toggle_item.set_label(f"Stop Dictation ({key})")
+                self._toggle_item.set_label(f"Stop Dictation ({cfg.hotkey_toggle})")
                 self._indicator.set_icon_full(self._icon_name("listening"), "Listening")
             self._pause_item.set_sensitive(True)
         else:
-            key = cfg.hotkey_toggle if cfg.hotkey_mode == "toggle" else cfg.hotkey_start
-            self._toggle_item.set_label(f"Start Dictation ({key})")
+            self._toggle_item.set_label(f"Start Dictation ({cfg.hotkey_toggle})")
             self._indicator.set_icon_full(self._icon_name("idle"), "Idle")
             self._pause_item.set_sensitive(False)
             self._status_item.set_label("Idle")

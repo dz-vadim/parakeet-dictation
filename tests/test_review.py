@@ -433,17 +433,6 @@ class FakeGioBus:
                         GLib.Variant("(ssx)", (component, action, 0)))
 
 
-class FakeGlobalHotKeys:
-    def __init__(self, _bindings):
-        self.daemon = False
-
-    def start(self):
-        pass
-
-    def stop(self):
-        pass
-
-
 class FakeNameWatch:
     """Gio.bus_watch_name_on_connection / bus_unwatch_name for one name."""
 
@@ -485,20 +474,14 @@ def fake_hotkeys_gio(bus, names=None):
 
 def review4_hotkey_rebuild_unsubscribes():
     print("\n[#4] rebuild() leaves exactly one press/release subscription pair")
-    from types import SimpleNamespace
-    from gi.repository import Gio
     from parakeet_dictation import hotkeys as da_hotkeys
     da_hotkeys.DIAG = TEST_DIAG
     bus = FakeGioBus()
     saved_gio = da_hotkeys.Gio
-    saved_pynput = sys.modules.get("pynput")
     da_hotkeys.Gio = fake_hotkeys_gio(bus)
-    sys.modules["pynput"] = SimpleNamespace(
-        keyboard=SimpleNamespace(GlobalHotKeys=FakeGlobalHotKeys,
-                                 HotKey=SimpleNamespace(parse=lambda b: [b])))
     presses, releases = [], []
     try:
-        cfg = da_config.AppConfig(hotkey_mode="hold")
+        cfg = da_config.AppConfig()
         mgr = da_hotkeys.HotkeyManager(
             cfg, on_toggle=lambda: None, on_start=lambda: None, on_stop=lambda: None,
             on_pause=lambda: None, on_hold_press=lambda: presses.append(1),
@@ -521,10 +504,6 @@ def review4_hotkey_rebuild_unsubscribes():
         check("stop() leaves no subscription behind", len(bus.subs) == 0, str(bus.subs))
     finally:
         da_hotkeys.Gio = saved_gio
-        if saved_pynput is None:
-            sys.modules.pop("pynput", None)
-        else:
-            sys.modules["pynput"] = saved_pynput
 
 
 # ---------------------------------------------------------------------------
@@ -1355,61 +1334,13 @@ def review18_portal_error_mid_chord():
 
 
 # ---------------------------------------------------------------------------
-# #19 (C4)  A binding pynput cannot parse ("Meta+Z" in hotkey_toggle) used to
-#     raise ValueError out of keyboard.GlobalHotKeys and kill the app at every
-#     launch.  The manager drops it and says so; enforce() resets it.
+# #19 (C4)  A binding pynput could not parse used to kill the app at launch.
+#     pynput is gone; binding validation is covered by test_settings #3/#4.
 # ---------------------------------------------------------------------------
 
 def review19_bad_pynput_binding():
-    print("\n[#19 C4] a binding pynput rejects neither crashes nor survives a load")
-    from pynput import keyboard
-    from parakeet_dictation import hotkeys as da_hotkeys
-    da_hotkeys.DIAG = TEST_DIAG
-    built = []
-
-    class StrictGlobalHotKeys(FakeGlobalHotKeys):
-        def __init__(self, bindings):
-            super().__init__(bindings)
-            for b in bindings:
-                keyboard.HotKey.parse(b)          # raises like the real one
-            built.append(dict(bindings))
-
-    saved = keyboard.GlobalHotKeys
-    keyboard.GlobalHotKeys = StrictGlobalHotKeys
-    try:
-        cfg = da_config.AppConfig(hotkey_mode="toggle")
-        cfg.hotkey_toggle = "Meta+Z"               # what enforce() would refuse
-        mgr = da_hotkeys.HotkeyManager(cfg, on_toggle=lambda: None, on_start=lambda: None,
-                                       on_stop=lambda: None, on_pause=lambda: None)
-        try:
-            status, err = mgr.start(), None
-        except Exception as e:          # noqa: BLE001 — that IS the bug
-            status, err = None, e
-        check("start() does not raise on an unparseable binding", err is None, repr(err))
-        check("it returns a status naming the binding",
-              bool(status) and "Meta+Z" in status, repr(status))
-        check("the valid bindings are still registered",
-              bool(built) and list(built[-1]) == [cfg.hotkey_pause], str(built))
-        mgr.stop()
-    finally:
-        keyboard.GlobalHotKeys = saved
-
-    events_seen = []
-    cfg = da_config.AppConfig(hotkey_toggle="Meta+Z", hotkey_start="<ctrl>+",
-                              hotkey_stop="<ctrl>+8", hotkey_pause="")
-    with redirect_stderr(io.StringIO()):
-        forced = cfg.enforce(lambda ev, **kw: events_seen.append((ev, kw)))
-    defaults = da_config.AppConfig()
-    check("enforce() resets an unparseable hotkey_toggle to its default",
-          cfg.hotkey_toggle == defaults.hotkey_toggle and "hotkey_toggle" in forced,
-          f"{cfg.hotkey_toggle!r} {forced}")
-    check("and hotkey_start", cfg.hotkey_start == defaults.hotkey_start, cfg.hotkey_start)
-    check("a valid binding and an empty (disabled) pause are kept",
-          cfg.hotkey_stop == "<ctrl>+8" and cfg.hotkey_pause == "",
-          f"{cfg.hotkey_stop!r} {cfg.hotkey_pause!r}")
-    check("each reset is logged with the key it changed",
-          {kw.get("key") for ev, kw in events_seen if ev == "config_forced"}
-          >= {"hotkey_toggle", "hotkey_start"}, str(events_seen))
+    print("\n[#19 C4] pynput bindings")
+    print("  (moved to test_settings #4)")
 
 
 # ---------------------------------------------------------------------------
@@ -1432,7 +1363,7 @@ class NotBeforeTyper(da_insert.TextTyper):
 
 def review20_stop_honours_paste_min_delay():
     print("\n[#20 C5] an explicit stop holds the chord back like a release does")
-    ctl, eng, _ov = make_controller(hotkey_mode="toggle", paste_min_delay_ms=350)
+    ctl, eng, _ov = make_controller(paste_min_delay_ms=350)
     typer = NotBeforeTyper()
     ctl._typer = typer
     ctl.toggle()
@@ -1457,18 +1388,15 @@ def review20_stop_honours_paste_min_delay():
 
 def review21_kglobalaccel_restart_reregisters():
     print("\n[#21 C6] push-to-talk survives a kglobalaccel restart")
-    from types import SimpleNamespace
     from parakeet_dictation import hotkeys as da_hotkeys
     da_hotkeys.DIAG = TEST_DIAG
     bus, names = FakeGioBus(), FakeNameWatch()
-    saved_gio, saved_pynput = da_hotkeys.Gio, sys.modules.get("pynput")
+    saved_gio = da_hotkeys.Gio
     da_hotkeys.Gio = fake_hotkeys_gio(bus, names)
-    sys.modules["pynput"] = SimpleNamespace(keyboard=SimpleNamespace(
-        GlobalHotKeys=FakeGlobalHotKeys, HotKey=SimpleNamespace(parse=lambda b: [b])))
     presses = []
     try:
         mgr = da_hotkeys.HotkeyManager(
-            da_config.AppConfig(hotkey_mode="hold"), on_toggle=lambda: None,
+            da_config.AppConfig(), on_toggle=lambda: None,
             on_start=lambda: None, on_stop=lambda: None, on_pause=lambda: None,
             on_hold_press=lambda: presses.append(1))
         mgr.start()
@@ -1494,10 +1422,6 @@ def review21_kglobalaccel_restart_reregisters():
               not names.watches and not bus.subs, f"{names.watches} {bus.subs}")
     finally:
         da_hotkeys.Gio = saved_gio
-        if saved_pynput is None:
-            sys.modules.pop("pynput", None)
-        else:
-            sys.modules["pynput"] = saved_pynput
 
 
 # ---------------------------------------------------------------------------
@@ -1901,7 +1825,7 @@ def review27_int16_clip_and_beep_errors():
 def review28_enforce_validates_enums_and_ranges():
     print("\n[#28 F3 E8] enforce() resets bad enums and out-of-range numbers")
     d = da_config.AppConfig()
-    bad = dict(hotkey_mode="push", overlay_position="left", insert_mode="each",
+    bad = dict(ui_language="de", overlay_position="left", insert_mode="each",
                paste_transport="x11", typer="xdotool", tray_icon_style="cat",
                paste_chord="ctrl+insert", terminal_paste_chord="",
                num_threads=0, night_start=24, night_end=-1, vad_threshold=1.5,
@@ -1932,7 +1856,7 @@ def review28_enforce_validates_enums_and_ranges():
           cfg.coalesce_target_s == 0.0 and cfg.preview_window_s == 30.0,
           f"{cfg.coalesce_target_s} {cfg.preview_window_s}")
 
-    good = da_config.AppConfig(hotkey_mode="toggle", insert_mode="per_segment",
+    good = da_config.AppConfig(insert_mode="per_segment",
                                overlay_position="top", paste_transport="ydotool",
                                typer="wtype", num_threads=1, night_start=0, night_end=23,
                                preview_interval_s=0.0)

@@ -91,7 +91,65 @@ def s2_i18n():
     check("no fuzzy entries", "#, fuzzy" not in po.read_text().split("\n\n", 1)[1])
 
 
-SECTIONS = {1: s1_shortcuts, 2: s2_i18n}
+def s3_config_migration():
+    print("\n[3] config: defaults, migration of the pynput era, enforce")
+    import json, os, tempfile
+    from parakeet_dictation import config as cfgmod
+    d = cfgmod.AppConfig()
+    check("defaults Insert / Meta+Insert / system",
+          (d.hotkey_hold, d.hotkey_toggle, d.ui_language) == ("Insert", "Meta+Insert", "system"))
+    for gone in ("hotkey_mode", "hotkey_start", "hotkey_stop", "hotkey_pause"):
+        check(f"{gone} is gone", not hasattr(d, gone))
+    events = []
+    log = lambda ev, **kw: events.append((ev, kw))
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "config.json"
+        path.write_text(json.dumps({"hotkey_mode": "toggle", "hotkey_toggle": "<ctrl>+0",
+                                    "hotkey_start": "<ctrl>+9", "hotkey_pause": "<ctrl>+<alt>+0",
+                                    "hotkey_hold": "Meta+Z", "insert_mode": "per_segment"}))
+        saved = (cfgmod.CONFIG_FILE, cfgmod.CONFIG_DIR)
+        cfgmod.CONFIG_FILE, cfgmod.CONFIG_DIR = path, Path(tmp)
+        try:
+            import io
+            from contextlib import redirect_stderr
+            with redirect_stderr(io.StringIO()):
+                c = cfgmod.AppConfig.load(log)
+                c.save(log)
+        finally:
+            cfgmod.CONFIG_FILE, cfgmod.CONFIG_DIR = saved
+        check("pynput toggle -> Meta+Insert", c.hotkey_toggle == "Meta+Insert", c.hotkey_toggle)
+        check("old default Meta+Z -> Insert", c.hotkey_hold == "Insert", c.hotkey_hold)
+        check("per_segment survives (start/stop takes)", c.insert_mode == "per_segment")
+        check("config_migrated logged", any(e == "config_migrated" for e, _ in events), str(events))
+        on_disk = json.loads(path.read_text())
+        check("dead keys dropped on save",
+              not {"hotkey_mode", "hotkey_start", "hotkey_pause"} & set(on_disk), str(on_disk))
+    with redirect_stderr(io.StringIO()):        # enforce() also warns on stderr
+        c = cfgmod.AppConfig(hotkey_hold="Meta+Q", hotkey_toggle="Meta+Q")
+        forced = c.enforce(lambda *a, **k: None)
+        check("duplicate binding: toggle reset", c.hotkey_toggle == "Meta+Insert"
+              and "hotkey_toggle" in forced, c.hotkey_toggle)
+        c = cfgmod.AppConfig(hotkey_hold="Meta+Insert", hotkey_toggle="Meta+Insert")
+        c.enforce(lambda *a, **k: None)
+        check("duplicate of the default: toggle disabled", c.hotkey_toggle == "")
+        c = cfgmod.AppConfig(hotkey_hold="Meta+", hotkey_toggle="")
+        c.enforce(lambda *a, **k: None)
+        check("unparseable hold reset, empty toggle kept", (c.hotkey_hold, c.hotkey_toggle) == ("Insert", ""))
+        c = cfgmod.AppConfig(ui_language="de")
+        c.enforce(lambda *a, **k: None)
+        check("unknown ui_language reset", c.ui_language == "system")
+        canon = []
+        c = cfgmod.AppConfig(hotkey_hold="ctrl+d", hotkey_toggle="super+insert")
+        forced = c.enforce(lambda ev, **kw: canon.append((ev, kw)))
+        check("valid non-canonical bindings rewritten (R3)",
+              (c.hotkey_hold, c.hotkey_toggle) == ("Ctrl+D", "Meta+Insert")
+              and {"hotkey_hold", "hotkey_toggle"} <= set(forced)
+              and sum(1 for ev, kw in canon
+                      if ev == "config_forced" and kw.get("reason") == "canonical") == 2,
+              f"{c.hotkey_hold!r} {c.hotkey_toggle!r} {canon}")
+
+
+SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration}
 
 
 def main(argv):

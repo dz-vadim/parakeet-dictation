@@ -133,13 +133,8 @@ def main():
     profile_name = controller.profiles.get(
         config.model_profile, {}
     ).get("name", config.model_profile)
-    if config.hotkey_mode == "hold":
-        mode_desc = f"Push-to-talk: hold {config.hotkey_hold}"
-    elif config.hotkey_mode == "toggle":
-        mode_desc = f"Toggle: {config.hotkey_toggle}"
-    else:
-        mode_desc = f"Start: {config.hotkey_start}, Stop: {config.hotkey_stop}"
-    print(f"{APP_NAME} running. {mode_desc}. Pause: {config.hotkey_pause}")
+    mode_desc = f"Hold {config.hotkey_hold} to talk, {config.hotkey_toggle or 'no'} start/stop shortcut"
+    print(f"{APP_NAME} running. {mode_desc}.")
     print(f"Model: {profile_name} | Typer: {config.typer} | Threads: {config.num_threads}")
 
     Gtk.main()
