@@ -215,6 +215,22 @@ def s4_hotkeys_two_actions():
                           [([sc.qt_key_sequence("Meta+Alt+D")],)])))
         check("KDE change reported as hotkey_toggle=Meta+Alt+D",
               changed == [("hotkey_toggle", "Meta+Alt+D")], str(changed))
+
+        def kde_change(action, keys):
+            changed.clear()
+            changed_handlers[0](None, None, None, None, None, GLib.Variant(
+                "(asa(ai))", (["parakeet-dictation", action, "Parakeet Dictation", "x"],
+                              keys)))
+            return list(changed)
+
+        got = kde_change("toggle", [([0x010000AD],)])         # Qt::Key_MicMute
+        check("an unnamable key from KDE is not reported", got == [], str(got))
+        got = kde_change("toggle", [([sc.qt_key_sequence("Meta+K"),
+                                      sc.qt_key_sequence("Meta+L")],)])
+        check("a two-chord sequence from KDE is not reported", got == [], str(got))
+        got = kde_change("push-to-talk", [])
+        check("a binding cleared in KDE is reported as \"\"",
+              got == [("hotkey_hold", "")], str(got))
         mgr.stop()
         calls.clear()
         status = mgr.rebuild(cfgmod.AppConfig(hotkey_toggle=""))

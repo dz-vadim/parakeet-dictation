@@ -247,9 +247,17 @@ class HotkeyManager:
         config_key = {a: k for k, a, _d in self.ACTIONS}.get(action_id[1])
         if config_key is None:
             return
-        # a(ai): a list of 1-tuples, each holding the key ints of one sequence
-        first = keys[0][0][0] if keys and keys[0] and keys[0][0] else 0
-        binding = binding_from_qt(first)
+        # a(ai): a list of 1-tuples, each holding the key ints of one
+        # sequence (up to four chords, unused ones 0).  No keys, or only
+        # zeros, is a binding cleared in KDE.
+        chords = [k for k in (keys[0][0] if keys and keys[0] else []) if k]
+        binding = binding_from_qt(chords[0]) if chords else ""
+        if len(chords) > 1 or (chords and not binding):
+            # A multi-chord sequence or a key we cannot name (media keys,
+            # non-ASCII): saving it would truncate or wipe the user's KDE
+            # binding, so the config keeps what it has.
+            DIAG.log("hotkey_changed_in_kde", action=action_id[1], unsupported=1)
+            return
         if binding == getattr(self._config, config_key):
             return
         DIAG.log("hotkey_changed_in_kde", action=action_id[1])
