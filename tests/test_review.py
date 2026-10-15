@@ -1096,6 +1096,41 @@ def review15_cleanups_single_source_tables():
           da_insert.choose_chord("kitty", over)[0] == "shift+insert" and is_term("kitty", over))
 
 
+
+# ===========================================================================
+# 2026-10-15 full review (docs/reviews/2026-10-15-full-review.md).  Sections
+# from #16 on carry the finding id of that review in their title.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# #16 (C1)  Tap, then press-and-hold while capture is still opening: the
+#     second press cancels the deferred stop the tap left behind, so the
+#     take records for as long as the key is held.
+# ---------------------------------------------------------------------------
+
+def review16_press_cancels_deferred_stop():
+    print("\n[#16 C1] a press while STARTING cancels the deferred stop")
+    ctl, eng, ov = make_controller()
+    ctl.hold_press()
+    ctl.hold_release()                    # quick tap: capture not open yet
+    check("the tap's release is deferred", ctl._stop_pending, ctl.gesture)
+    before = len(diag_lines())
+    ctl.hold_press()                      # pressed again and HELD
+    check("the second press clears the deferred stop", not ctl._stop_pending)
+    check("and says so in the log",
+          bool(events(diag_lines()[before:], "deferred_stop_cancelled")))
+    capture_up(ctl, eng)
+    pump(400)
+    check("capture open with the key held: the take is recording",
+          ctl.gesture == "recording" and eng.stops == 0,
+          f"gesture={ctl.gesture} stops={eng.stops}")
+    check("and the pill says listening", ov.states[-1][0] == "listening", str(ov.states[-1]))
+    ctl.hold_release()
+    ended = pump_until(lambda: ctl.gesture == "idle", 4000)
+    check("the real release still ends the take", ended and eng.stops == 1,
+          f"gesture={ctl.gesture} stops={eng.stops}")
+    ctl.shutdown()
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1112,7 +1147,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             12: review12_tests_locate_the_checkout_from_file,
             13: review13_focus_snapshot_is_cache_only,
             14: review14_insertion_off_thread_and_batched_backspaces,
-            15: review15_cleanups_single_source_tables}
+            15: review15_cleanups_single_source_tables,
+            16: review16_press_cancels_deferred_stop}
 
 
 def main(argv):

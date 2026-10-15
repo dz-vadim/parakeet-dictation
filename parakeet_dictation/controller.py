@@ -296,6 +296,15 @@ class DictationController:
                 self._start_pending = True
                 DIAG.log("hold_press_queued", take=self._take_seq)
             return
+        if self._gesture == GESTURE_STARTING and self._stop_pending:
+            # Tap, then press-and-hold while capture is still opening: the
+            # key is down again, so the release the tap left behind no
+            # longer applies.  Keeping it stopped the take the moment the
+            # stream opened, with the key still held.
+            self._stop_pending = False
+            DIAG.log("deferred_stop_cancelled", take=self._take_seq)
+            self._overlay_state("preparing")
+            return
         if self._gesture != GESTURE_IDLE:
             DIAG.log("hold_press_ignored", state=self._gesture, take=self._take_seq)
             return
