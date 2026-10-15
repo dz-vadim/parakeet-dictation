@@ -622,16 +622,32 @@ class TextTyper:
                 self._clip_gen += 1   # invalidates any restore already waiting
                 gen = self._clip_gen
                 saved = self._clip_saved
+            staged = 0
             try:
-                _run_quiet(["wl-copy", "--", text])
-                _run_quiet(["wl-copy", "--primary", "--", text])
-            except OSError:
-                # Nothing (or only half) was staged: the user's clipboard is
-                # still theirs, so there is nothing to put back later — and
-                # the next paste must read it afresh.
-                self._clip_restore_pending = False
-                self._clip_saved = None
-                raise
+                for flag in ([], ["--primary"]):
+                    staged += 1        # a wl-copy that times out may own it
+                    _run_quiet(["wl-copy", *flag, "--", text])
+            except (OSError, subprocess.TimeoutExpired) as e:
+                timed_out = isinstance(e, subprocess.TimeoutExpired)
+                if timed_out or staged > 1:
+                    # Half staged (or a selection a killed wl-copy may have
+                    # taken): put the user's selections back now — there is
+                    # no paste to wait for — so the dictated text neither
+                    # lingers on the clipboard nor lands in Klipper's history.
+                    if not self._keep_on_clipboard:
+                        self._restore_selections(saved)
+                else:
+                    # Nothing was staged: the user's clipboard is still
+                    # theirs, and the next paste must read it afresh.
+                    self._clip_restore_pending = False
+                    self._clip_saved = None
+                if not timed_out:
+                    raise              # _type_raw reports the OSError
+                DIAG.log("insert_failed", err="TimeoutExpired", exe="wl-copy")
+                print("ERROR: wl-copy timed out", file=sys.stderr)
+                if self._on_failure:
+                    self._on_failure("Insertion failed: wl-copy timed out")
+                return
             time.sleep(STAGE_SETTLE_S)
             ok = self._paste(chord, detect, cls)
             if not ok:
@@ -692,20 +708,25 @@ class TextTyper:
             with self._clip_lock:
                 if gen != self._clip_gen:
                     return   # a later paste owns the clipboard; it will restore
-                clip, primary = saved if saved else (None, None)
-                for flag, value in (([], clip), (["--primary"], primary)):
-                    try:
-                        if value:
-                            _run_quiet(["wl-copy", *flag], input=value)
-                        else:
-                            _run_quiet(["wl-copy", *flag, "--clear"])
-                    except (OSError, subprocess.TimeoutExpired) as e:
-                        DIAG.log("clipboard_restore_failed", primary=bool(flag),
-                                 err=type(e).__name__)
-                self._clip_restore_pending = False
-                self._clip_saved = None
+                self._restore_selections(saved)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _restore_selections(self, saved):
+        """Write `saved` (clipboard, primary) back and clear the restore state.
+        The caller holds `_clip_lock`."""
+        clip, primary = saved if saved else (None, None)
+        for flag, value in (([], clip), (["--primary"], primary)):
+            try:
+                if value:
+                    _run_quiet(["wl-copy", *flag], input=value)
+                else:
+                    _run_quiet(["wl-copy", *flag, "--clear"])
+            except (OSError, subprocess.TimeoutExpired) as e:
+                DIAG.log("clipboard_restore_failed", primary=bool(flag),
+                         err=type(e).__name__)
+        self._clip_restore_pending = False
+        self._clip_saved = None
 
     # -- chord transport ----------------------------------------------------
 

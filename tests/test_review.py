@@ -1131,6 +1131,95 @@ def review16_press_cancels_deferred_stop():
           f"gesture={ctl.gesture} stops={eng.stops}")
     ctl.shutdown()
 
+
+# ---------------------------------------------------------------------------
+# #17 (C2)  A wl-copy that hangs (TimeoutExpired, not an OSError) is reported
+#     and leaves no stale save/restore state behind for the next take.
+# ---------------------------------------------------------------------------
+
+class ClipboardWorld:
+    """wl-copy / wl-paste / ydotool over two in-memory selections.  Text
+    staged through argv (`-- text`) or stdin (`input=`) is accepted alike.
+    `hang = (selection, n)` makes the next n wl-copy calls on that selection
+    time out (subprocess.run raises TimeoutExpired once it has killed it)."""
+
+    def __init__(self, clip=b"USER-OLD", primary=b"USER-P"):
+        self.sel = {"clip": clip, "primary": primary}
+        self.hang = (None, 0)
+        self.pastes = []
+        self.argv = []
+        self.inputs = []
+
+    def run(self, args, **kw):
+        args = list(args)
+        self.argv.append(args)
+        key = "primary" if "--primary" in args else "clip"
+        if args[0] == "wl-copy":
+            if self.hang[0] == key and self.hang[1] > 0:
+                self.hang = (key, self.hang[1] - 1)
+                raise da_insert.subprocess.TimeoutExpired(args, kw.get("timeout", 5))
+            if "--clear" in args:
+                self.sel[key] = None
+                return _Completed()
+            if "--" in args:
+                self.sel[key] = " ".join(args[args.index("--") + 1:]).encode()
+            else:
+                self.inputs.append(kw.get("input"))
+                self.sel[key] = bytes(kw.get("input") or b"")
+            return _Completed()
+        if args[0] == "wl-paste":
+            data = self.sel[key]
+            return _Completed(1, b"") if data is None else _Completed(0, data)
+        if args[0] in ("ydotool", "wtype"):
+            self.pastes.append(self.sel["clip"])
+        return _Completed()
+
+    def install(self):
+        saved = (da_insert.subprocess.run, da_insert.shutil.which,
+                 da_insert.portal_keyboard)
+        da_insert.subprocess.run = self.run
+        da_insert.shutil.which = lambda n: f"/usr/bin/{n}" if n == "ydotool" else None
+        da_insert.portal_keyboard = lambda: None
+
+        def undo():
+            (da_insert.subprocess.run, da_insert.shutil.which,
+             da_insert.portal_keyboard) = saved
+        return undo
+
+
+def review17_wl_copy_timeout_is_reported():
+    print("\n[#17 C2] a hung wl-copy is reported and resets the clipboard state")
+    for hang in ("clip", "primary"):
+        world = ClipboardWorld()
+        world.hang = (hang, 1)
+        undo = world.install()
+        try:
+            fails = []
+            typer = da_insert.TextTyper("clipboard", on_failure=fails.append)
+            typer.type_text("first take")
+            typer.wait_idle()
+            check(f"hung {hang} staging: the failure is reported",
+                  any("wl-copy timed out" in f for f in fails), str(fails))
+            check(f"hung {hang} staging: no chord was pressed", world.pastes == [],
+                  str(world.pastes))
+            time.sleep(da_insert.RESTORE_AFTER_S + 0.4)
+            check(f"hung {hang} staging: no restore is left pending",
+                  not typer._clip_restore_pending and typer._clip_saved is None,
+                  f"pending={typer._clip_restore_pending}")
+            check(f"hung {hang} staging: the user's selections are theirs again",
+                  world.sel["clip"] == b"USER-OLD" and world.sel["primary"] == b"USER-P",
+                  str(world.sel))
+            world.sel["clip"] = b"USER-NEW-COPY"        # the user copies something
+            typer.type_text("second take")
+            typer.wait_idle()
+            time.sleep(da_insert.RESTORE_AFTER_S + 0.4)
+            check(f"hung {hang} staging: the next take pastes its own text",
+                  world.pastes == [b"second take "], str(world.pastes))
+            check(f"hung {hang} staging: and restores the NEW copy, not a stale one",
+                  world.sel["clip"] == b"USER-NEW-COPY", repr(world.sel["clip"]))
+        finally:
+            undo()
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1148,7 +1237,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             13: review13_focus_snapshot_is_cache_only,
             14: review14_insertion_off_thread_and_batched_backspaces,
             15: review15_cleanups_single_source_tables,
-            16: review16_press_cancels_deferred_stop}
+            16: review16_press_cancels_deferred_stop,
+            17: review17_wl_copy_timeout_is_reported}
 
 
 def main(argv):
