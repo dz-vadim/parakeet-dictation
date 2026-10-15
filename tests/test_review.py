@@ -1663,6 +1663,37 @@ def review23_privacy():
     check("and stays 0600 after a trim rewrites it",
           stat.S_IMODE(f2.stat().st_mode) == 0o600, oct(stat.S_IMODE(f2.stat().st_mode)))
 
+
+# ---------------------------------------------------------------------------
+# #24 (C9)  Text that arrives after its take is over (an abandoned drain's
+#     late decode) must not ride along with the next take's paste.
+# ---------------------------------------------------------------------------
+
+def review24_late_text_is_not_pasted_into_the_next_take():
+    print("\n[#24 C9] a late text from a finished take is dropped")
+    ctl, eng, _ov = make_controller()
+    typer = NotBeforeTyper()
+    ctl._typer = typer
+    ctl.hold_press()
+    capture_up(ctl, eng)
+    ctl._on_final_text("first take")
+    ctl.hold_release()
+    pump_until(lambda: ctl.gesture == "idle", 4000)
+    before = len(diag_lines())
+    ctl._on_final_text("late from take one")          # after the take ended
+    ctl._on_commit_partial("late partial")
+    check("the late text is logged as dropped",
+          bool(events(diag_lines()[before:], "late_text_dropped")))
+    ctl.hold_press()
+    capture_up(ctl, eng)
+    ctl._on_final_text("second take")
+    ctl.hold_release()
+    pump_until(lambda: ctl.gesture == "idle", 4000)
+    texts = [t for t, _nb, _t in typer.calls]
+    check("each take pasted only its own text",
+          texts == ["first take", "second take"], str(texts))
+    ctl.shutdown()
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1687,7 +1718,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             20: review20_stop_honours_paste_min_delay,
             21: review21_kglobalaccel_restart_reregisters,
             22: review22_shutdown_flushes_clipboard_restore,
-            23: review23_privacy}
+            23: review23_privacy,
+            24: review24_late_text_is_not_pasted_into_the_next_take}
 
 
 def main(argv):

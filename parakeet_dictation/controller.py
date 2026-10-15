@@ -236,6 +236,9 @@ class DictationController:
             DIAG.log("start_ignored", state=self._gesture, take=self._take_seq)
             return
         self._take_seq += 1
+        # Nothing from an earlier take may be pasted with this one.
+        self._take_chunks = []
+        self._take_texts = 0
         self._enter(GESTURE_STARTING, "start")
         self._preview_reset()
         self._overlay_state("preparing")
@@ -612,7 +615,19 @@ class DictationController:
             # already speaking.
             self.preload()
 
+    def _drop_if_idle(self, text: str) -> bool:
+        """Text with no take to belong to: a late decode from a session the
+        drain gave up on, arriving after its take was closed.  Kept, it sat
+        in _take_chunks and was pasted with the NEXT take's text."""
+        if self._gesture != GESTURE_IDLE:
+            return False
+        if text:
+            DIAG.log("late_text_dropped", chars=len(text), take=self._take_seq)
+        return True
+
     def _on_final_text(self, text: str):
+        if self._drop_if_idle(text):
+            return
         if self._config.filter_fillers:
             text = filter_fillers(text)
         if not text:
@@ -640,7 +655,7 @@ class DictationController:
 
     def _on_partial_type(self, text: str):
         """Type a streaming partial into the active window (overwrite prev)."""
-        if self._insert_at_end:
+        if self._insert_at_end or self._gesture == GESTURE_IDLE:
             # A preview must never insert: in end-of-take mode the document is
             # touched exactly once, after the take is over.
             return
@@ -651,6 +666,8 @@ class DictationController:
 
     def _on_commit_partial(self, text: str):
         """Commit the streaming partial as final text."""
+        if self._drop_if_idle(text):
+            return
         if self._config.filter_fillers:
             text = filter_fillers(text)
         # One rule for the panel in both insert modes: it mirrors every final
