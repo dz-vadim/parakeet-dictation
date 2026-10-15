@@ -47,7 +47,6 @@ class FocusTracker:
     KWIN = "org.kde.KWin"
     SCRIPTING_PATH = "/Scripting"
     SCRIPTING_IFACE = "org.kde.kwin.Scripting"
-    SCRIPT_IFACE = "org.kde.kwin.Script"
     PLUGIN = "parakeet-dictation-focus"
     SCRIPT = Path(__file__).resolve().parent / "data" / "focus.js"
     # How often the timer re-verifies that KWin still holds the script.  The
@@ -171,8 +170,13 @@ class FocusTracker:
             if self._bus is None:
                 self._loading = False
                 return
-            call(f"{self.SCRIPTING_PATH}/Script{script_id}", self.SCRIPT_IFACE,
-                 "run", None, None, on_run)
+            # Scripting.start(), not /Scripting/Script<id>.run(): KWin hands a
+            # reloaded plugin the id of the copy it just unloaded, and while
+            # that copy's D-Bus object lingers, run() lands on the dead one —
+            # the script is "loaded" yet never reports a window.  start() runs
+            # every loaded script that is not running yet, which is ours.
+            call(self.SCRIPTING_PATH, self.SCRIPTING_IFACE,
+                 "start", None, None, on_run)
 
         def on_run(bus, result, *_user):
             try:
