@@ -1220,6 +1220,97 @@ def review17_wl_copy_timeout_is_reported():
         finally:
             undo()
 
+
+# ---------------------------------------------------------------------------
+# #18 (C3)  A portal error in the middle of a chord: whatever went down is
+#     released and the session closed; ydotool replays the chord only when
+#     no paste can have happened, never after the V-down went out.
+# ---------------------------------------------------------------------------
+
+def _portal_world(fail_at, release_ok=False):
+    """A ready PortalKeyboard whose NotifyKeyboardKeysym fails from call
+    number `fail_at` on (0-based; None = never), and the ydotool calls the
+    typer makes behind it."""
+    portal = da_insert.PortalKeyboard()
+    portal._state, portal._session, portal._bus = "ready", "/s", object()
+    log = {"keys": [], "ydotool": [], "closed": 0, "calls": 0}
+
+    def call(method, params, *_a, **_k):
+        if method == "Close":
+            log["closed"] += 1
+            return None
+        n = log["calls"]
+        log["calls"] += 1
+        keysym, state = params.unpack()[2:]
+        if fail_at is not None and n >= fail_at and not (release_ok and n > fail_at
+                                                         and state == 0):
+            raise GLib.Error("Timeout was reached")
+        log["keys"].append((keysym, state))
+        return None
+
+    portal._call = call
+
+    def run(args, **_kw):
+        log["ydotool"].append(list(args))
+        return _Completed()
+
+    return portal, log, run
+
+
+def review18_portal_error_mid_chord():
+    print("\n[#18 C3] a portal error mid-chord neither double-pastes nor sticks Ctrl")
+    KS_CTRL, KS_V = 0xffe3, 0x76
+    saved = (da_insert.subprocess.run, da_insert.shutil.which, da_insert.portal_keyboard)
+    da_insert.shutil.which = lambda n: "/usr/bin/ydotool" if n == "ydotool" else None
+    try:
+        # Ctrl down, V down, V up went out; Ctrl up failed.
+        portal, log, run = _portal_world(fail_at=3)
+        da_insert.portal_keyboard = lambda: portal
+        da_insert.subprocess.run = run
+        ok, transport = da_insert.TextTyper("clipboard")._send_chord("ctrl+v")
+        check("V-down went out: the paste counts as done, through the portal",
+              ok and transport == "portal", f"ok={ok} transport={transport}")
+        check("and ydotool does NOT replay the chord (no second paste)",
+              log["ydotool"] == [], str(log["ydotool"]))
+        check("the session is closed and marked dead",
+              log["closed"] == 1 and not portal.ready, f"closed={log['closed']}")
+
+        # Ctrl down went out; V down failed: no paste happened, so ydotool
+        # may press the chord — but Ctrl is released on the portal first.
+        portal, log, run = _portal_world(fail_at=1, release_ok=True)
+        da_insert.portal_keyboard = lambda: portal
+        da_insert.subprocess.run = run
+        ok, transport = da_insert.TextTyper("clipboard")._send_chord("ctrl+v")
+        attempts = log["keys"][1:]
+        check("only Ctrl went down: the portal releases it",
+              (KS_CTRL, 0) in attempts, str(attempts))
+        check("and V is never released without having been pressed",
+              (KS_V, 0) not in attempts, str(attempts))
+        check("then ydotool presses the chord once",
+              ok and transport == "ydotool" and len(log["ydotool"]) == 1,
+              f"ok={ok} transport={transport} ydotool={len(log['ydotool'])}")
+
+        # Nothing went out at all: plain fallback, as before.
+        portal, log, run = _portal_world(fail_at=0)
+        da_insert.portal_keyboard = lambda: portal
+        da_insert.subprocess.run = run
+        ok, transport = da_insert.TextTyper("clipboard")._send_chord("ctrl+v")
+        check("a failure on the first key falls back to ydotool",
+              ok and transport == "ydotool" and len(log["ydotool"]) == 1,
+              f"ok={ok} transport={transport}")
+
+        # And the clean path is untouched.
+        portal, log, run = _portal_world(fail_at=None)
+        da_insert.portal_keyboard = lambda: portal
+        da_insert.subprocess.run = run
+        ok, transport = da_insert.TextTyper("clipboard")._send_chord("ctrl+v")
+        check("a clean portal chord: four keysyms, no ydotool",
+              ok and transport == "portal" and len(log["keys"]) == 4
+              and log["ydotool"] == [] and portal.ready, str(log))
+    finally:
+        (da_insert.subprocess.run, da_insert.shutil.which,
+         da_insert.portal_keyboard) = saved
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1238,7 +1329,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             14: review14_insertion_off_thread_and_batched_backspaces,
             15: review15_cleanups_single_source_tables,
             16: review16_press_cancels_deferred_stop,
-            17: review17_wl_copy_timeout_is_reported}
+            17: review17_wl_copy_timeout_is_reported,
+            18: review18_portal_error_mid_chord}
 
 
 def main(argv):

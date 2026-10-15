@@ -82,6 +82,7 @@ _CHORD_KEYCODES = {
 # keycodes, are what makes the chord layout independent (Ctrl+V pasted under
 # both `us` and `ua` here).
 _KS_CONTROL_L, _KS_SHIFT_L, _KS_V, _KS_INSERT = 0xffe3, 0xffe1, 0x76, 0xff63
+_MODIFIER_KEYSYMS = frozenset((_KS_CONTROL_L, _KS_SHIFT_L))
 _CHORD_KEYSYMS = {
     CHORD_CTRL_V: ((_KS_CONTROL_L, 1), (_KS_V, 1), (_KS_V, 0), (_KS_CONTROL_L, 0)),
     CHORD_CTRL_SHIFT_V: ((_KS_CONTROL_L, 1), (_KS_SHIFT_L, 1), (_KS_V, 1),
@@ -388,20 +389,46 @@ class PortalKeyboard:
                  token=bool(token), ms=(time.monotonic() - t0) * 1000)
 
     def press(self, chord: str) -> bool:
-        """Press a chord as keysyms.  False (and the session marked dead) on
-        any D-Bus error, so the caller can fall through to ydotool."""
+        """Press a chord as keysyms.  True once the paste key went down.
+
+        A D-Bus error marks the session dead.  Mid-chord, every key already
+        pressed is released (best effort) and the session closed, so no
+        modifier is left stuck; the result then depends on whether the paste
+        key (V / Insert) went down.  If it did, the paste has happened and
+        True is returned — a ydotool replay would paste a second time.  If
+        it did not, False lets the caller fall through to ydotool.
+        """
         if not self.ready or chord not in _CHORD_KEYSYMS:
             return False
+        session = self._session
+        held = []                 # keysyms down and not yet released
+        pasted = False
+
+        def notify(keysym, state):
+            self._call("NotifyKeyboardKeysym",
+                       GLib.Variant("(oa{sv}iu)", (session, {}, keysym, state)),
+                       None, timeout_ms=2000)
+
         try:
             for keysym, state in _CHORD_KEYSYMS[chord]:
-                self._call("NotifyKeyboardKeysym",
-                           GLib.Variant("(oa{sv}iu)", (self._session, {}, keysym, state)),
-                           None, timeout_ms=2000)
+                notify(keysym, state)
+                if state:
+                    held.append(keysym)
+                    if keysym not in _MODIFIER_KEYSYMS:
+                        pasted = True
+                elif keysym in held:
+                    held.remove(keysym)
         except GLib.Error as e:
+            for keysym in reversed(held):
+                try:
+                    notify(keysym, 0)
+                except GLib.Error:
+                    pass
+            DIAG.log("portal_press_failed", err=type(e).__name__, pasted=pasted,
+                     stuck=len(held))
+            self.close()
             self._state = "failed"
-            self._session = None
-            DIAG.log("portal_press_failed", err=type(e).__name__)
-            return False
+            return pasted
         return True
 
     def close(self):
