@@ -1,9 +1,9 @@
 """Global shortcuts.
 
-Push-to-talk (hold mode) is registered with kglobalaccel, the only path that
-grabs a key on KDE Wayland.  The toggle / start-stop / pause bindings still go
-through a pynput listener, which only sees keys inside this app's own windows
-there; the tray and the SIGUSR1/SIGUSR2 signals are what drive those modes.
+Both of the app's shortcuts — hold to talk, and start / stop — are actions
+of our own kglobalaccel component, the only path that grabs a key on KDE
+Wayland.  They show up (and can be rebound) in System Settings > Shortcuts;
+a rebinding made there is reported back through `on_binding_changed`.
 """
 
 from gi.repository import Gio, GLib
@@ -11,7 +11,8 @@ from gi.repository import Gio, GLib
 from .config import APP_ID, APP_NAME, AppConfig
 from .dbus import call_sync
 from .diagnostics import DIAG
-from .shortcuts import qt_key_sequence  # noqa: F401  (re-export)
+from .i18n import _
+from .shortcuts import binding_from_qt, qt_key_sequence  # noqa: F401  (re-export)
 
 # ---------------------------------------------------------------------------
 # Global shortcuts via kglobalaccel
@@ -26,7 +27,7 @@ from .shortcuts import qt_key_sequence  # noqa: F401  (re-export)
 
 
 class KGlobalAccelHotkey:
-    """One push-to-talk action registered directly with kglobalaccel.
+    """One action registered directly with kglobalaccel.
 
     Gio.DBusConnection rather than dbus-python so the QKeySequence argument —
     `a(ai)`, a set of sequences each holding up to four key ints — is typed
@@ -40,19 +41,19 @@ class KGlobalAccelHotkey:
     ROOT_IFACE = "org.kde.KGlobalAccel"
     COMPONENT_IFACE = "org.kde.kglobalaccel.Component"
     COMPONENT = APP_ID
-    ACTION = "push-to-talk"
 
     # SetPresent (2) | NoAutoloading (4): the keys we pass win over whatever
     # kglobalshortcutsrc last cached for this action.
     SET_FLAGS = 6
 
-    def __init__(self, binding: str, on_press, on_release):
+    def __init__(self, binding: str, action: str, description: str, on_press,
+                 on_release=None):
         self._binding = binding
+        self.action = action
         self._on_press = on_press
         self._on_release = on_release
         self._bus = None
-        self._action_id = [self.COMPONENT, self.ACTION, APP_NAME,
-                           "Push-to-talk dictation"]
+        self._action_id = [self.COMPONENT, action, APP_NAME, description]
         self._subs = []
         self._watch_id = 0
         self._vanished = False
@@ -103,13 +104,15 @@ class KGlobalAccelHotkey:
         path = self._call(self.ROOT_PATH, self.ROOT_IFACE, "getComponent",
                           GLib.Variant("(s)", (self.COMPONENT,)), "(o)").unpack()[0]
 
-        for signal, handler in (("globalShortcutPressed", self._handle_press),
-                                ("globalShortcutReleased", self._handle_release)):
+        signals = [("globalShortcutPressed", self._handle_press)]
+        if self._on_release is not None:
+            signals.append(("globalShortcutReleased", self._handle_release))
+        for signal, handler in signals:
             self._subs.append(self._bus.signal_subscribe(
                 self.SERVICE, self.COMPONENT_IFACE, signal, path, None,
                 Gio.DBusSignalFlags.NONE, handler))
         self.registered = True
-        DIAG.log("hold_hotkey_registered", key=hex(key), path=path,
+        DIAG.log("hold_hotkey_registered", action=self.action, key=hex(key), path=path,
                  conflict=owner or "none")
         if not self._watch_id:
             # kglobalaccel forgets every component when it restarts (a
@@ -123,7 +126,7 @@ class KGlobalAccelHotkey:
     def _on_service_vanished(self, _conn, _name):
         if self.registered:
             self._vanished = True
-            DIAG.log("hold_hotkey_lost", reason="kglobalaccel_vanished")
+            DIAG.log("hold_hotkey_lost", action=self.action, reason="kglobalaccel_vanished")
 
     def _on_service_appeared(self, _conn, _name, _owner):
         # The watch reports the name as soon as it is armed; only a
@@ -136,9 +139,10 @@ class KGlobalAccelHotkey:
             owner = self.register()
         except (GLib.Error, ValueError) as e:
             self.registered = False
-            DIAG.log("hold_hotkey_failed", err=type(e).__name__, stage="reregister")
+            DIAG.log("hold_hotkey_failed", action=self.action, err=type(e).__name__,
+                     stage="reregister")
             return
-        DIAG.log("hold_hotkey_reregistered", conflict=owner or "none")
+        DIAG.log("hold_hotkey_reregistered", action=self.action, conflict=owner or "none")
 
     def _drop_subscriptions(self):
         for sub in self._subs:
@@ -146,11 +150,13 @@ class KGlobalAccelHotkey:
         self._subs = []
 
     def _handle_press(self, _conn, _sender, _path, _iface, _signal, params):
-        if params.unpack()[1] == self.ACTION:
+        if params.unpack()[1] == self.action:
             self._on_press()
 
     def _handle_release(self, _conn, _sender, _path, _iface, _signal, params):
-        if params.unpack()[1] == self.ACTION:
+        if self._on_release is None:
+            return
+        if params.unpack()[1] == self.action:
             self._on_release()
 
     def unregister(self):
@@ -177,49 +183,88 @@ class KGlobalAccelHotkey:
 # ---------------------------------------------------------------------------
 
 class HotkeyManager:
-    def __init__(self, config: AppConfig, on_toggle, on_start, on_stop, on_pause,
-                 on_hold_press=None, on_hold_release=None):
+    """The app's two global shortcuts, both registered with kglobalaccel.
+
+    pynput is gone: on KDE Wayland it could not grab keys outside the app's
+    own windows, so its Toggle/Start/Stop/Pause bindings never fired.
+    """
+
+    ACTIONS = (
+        # (config key, action id, description shown in System Settings)
+        ("hotkey_hold", "push-to-talk", "Hold to talk"),
+        ("hotkey_toggle", "toggle", "Start / stop dictation"),
+    )
+
+    def __init__(self, config: AppConfig, on_hold_press, on_hold_release, on_toggle,
+                 on_binding_changed=None):
         self._config = config
-        self._on_toggle = on_toggle
-        self._on_start = on_start
-        self._on_stop = on_stop
-        self._on_pause = on_pause
-        self._on_hold_press = on_hold_press or (lambda: None)
-        self._on_hold_release = on_hold_release or (lambda: None)
-        self._hold = None
+        self._callbacks = {
+            "push-to-talk": (on_hold_press, on_hold_release),
+            "toggle": (on_toggle, None),
+        }
+        self._on_binding_changed = on_binding_changed
+        self._hotkeys = []
+        self._changed_sub = 0
 
     def start(self) -> str:
-        """Bind push-to-talk.  Returns "" or a problem to show.
+        problems = []
+        for key, action, description in self.ACTIONS:
+            binding = getattr(self._config, key)
+            if not binding:
+                continue
+            press, release = self._callbacks[action]
+            hotkey = KGlobalAccelHotkey(binding, action, description, press, release)
+            try:
+                owner = hotkey.register()
+            except (GLib.Error, ValueError) as e:
+                DIAG.log("hotkey_failed", action=action, err=type(e).__name__)
+                problems.append(_("{binding} could not be registered: {error}")
+                                .format(binding=binding, error=e))
+                continue
+            self._hotkeys.append(hotkey)
+            if owner:
+                DIAG.log("hotkey_conflict", action=action, owner=owner)
+                problems.append(_("{binding} is already used by {owner} — change it in "
+                                  "Settings or in System Settings > Shortcuts")
+                                .format(binding=binding, owner=owner))
+        self._watch_changes()
+        return "; ".join(problems)
 
-        Interim: the pynput bindings are gone with their config keys; the
-        start/stop shortcut is registered with kglobalaccel in the next step.
-        """
-        return self._start_hold()
+    def _watch_changes(self):
+        if self._changed_sub or not self._hotkeys:
+            return
+        bus = self._hotkeys[0]._bus
+        self._changed_bus = bus
+        self._changed_sub = bus.signal_subscribe(
+            KGlobalAccelHotkey.SERVICE, KGlobalAccelHotkey.ROOT_IFACE,
+            "yourShortcutsChanged", KGlobalAccelHotkey.ROOT_PATH, None,
+            Gio.DBusSignalFlags.NONE, self._on_shortcuts_changed)
 
-    def _start_hold(self) -> str:
-        binding = self._config.hotkey_hold
-        if not binding:
-            return ""
-        self._hold = KGlobalAccelHotkey(binding, self._on_hold_press,
-                                        self._on_hold_release)
-        try:
-            owner = self._hold.register()
-        except (GLib.Error, ValueError) as e:
-            DIAG.log("hold_hotkey_failed", err=type(e).__name__)
-            self._hold = None
-            return f"Push-to-talk unavailable: {e}"
-        if owner:
-            DIAG.log("hold_hotkey_conflict", owner=owner)
-            return (f"{binding} is already held by {owner} — "
-                    f"free it in System Settings > Shortcuts")
-        return ""
+    def _on_shortcuts_changed(self, _conn, _sender, _path, _iface, _signal, params):
+        action_id, keys = params.unpack()
+        if len(action_id) < 2 or action_id[0] != KGlobalAccelHotkey.COMPONENT:
+            return
+        config_key = {a: k for k, a, _d in self.ACTIONS}.get(action_id[1])
+        if config_key is None:
+            return
+        # a(ai): a list of 1-tuples, each holding the key ints of one sequence
+        first = keys[0][0][0] if keys and keys[0] and keys[0][0] else 0
+        binding = binding_from_qt(first)
+        if binding == getattr(self._config, config_key):
+            return
+        DIAG.log("hotkey_changed_in_kde", action=action_id[1])
+        if self._on_binding_changed:
+            self._on_binding_changed(config_key, binding)
 
     def stop(self):
-        if self._hold:
-            self._hold.unregister()
-            self._hold = None
+        if self._changed_sub:
+            self._changed_bus.signal_unsubscribe(self._changed_sub)
+            self._changed_sub = 0
+        for hotkey in self._hotkeys:
+            hotkey.unregister()
+        self._hotkeys = []
 
     def rebuild(self, config: AppConfig) -> str:
-        self._config = config
         self.stop()
+        self._config = config
         return self.start()

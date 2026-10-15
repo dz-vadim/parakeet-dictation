@@ -9,7 +9,6 @@
 #     python-ten-vad       AUR, provided by python-ten-vad-bin (source in
 #                          packaging/deps/ of the upstream repository)
 #     python-sounddevice   AUR
-#     python-pynput        AUR
 #     everything else      official repositories
 #
 # After installing: see the post-install message (parakeet-dictation.install):
@@ -32,7 +31,6 @@ depends=(
   'python-cairo'
   'python-numpy'
   'python-sounddevice'
-  'python-pynput'
   'python-sherpa-onnx'
   'python-ten-vad'
   'python-requests'

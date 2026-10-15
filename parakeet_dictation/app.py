@@ -80,12 +80,10 @@ def main():
 
     hotkey_mgr = HotkeyManager(
         config,
-        on_toggle=lambda: (controller.toggle(), tray and tray.update_ui()),
-        on_start=lambda: (controller.start(), tray and tray.update_ui()),
-        on_stop=lambda: (controller.stop(), tray and tray.update_ui()),
-        on_pause=lambda: controller.pause(),
         on_hold_press=lambda: (controller.hold_press(), tray and tray.update_ui()),
         on_hold_release=lambda: (controller.hold_release(), tray and tray.update_ui()),
+        # controller.toggle(hold_off=has_modifier(...)) arrives with Task 5.
+        on_toggle=lambda: (controller.toggle(), tray and tray.update_ui()),
     )
 
     main_window = MainWindow(controller, hotkey_mgr)
@@ -107,9 +105,8 @@ def main():
     GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, _signal_quit)
     GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, _signal_quit)
 
-    # Global hotkeys on Wayland: pynput cannot grab keys outside the app's own
-    # windows, so the desktop's shortcut system drives us over signals instead.
-    # Bind a KDE shortcut to `parakeet-toggle` (SIGUSR1 = toggle, SIGUSR2 = pause).
+    # Scripts and other shortcut tools can drive the app over signals too:
+    # `parakeet-toggle` sends SIGUSR1 (toggle); SIGUSR2 pauses.
     def _signal_toggle(*_):
         controller.toggle()
         if tray:

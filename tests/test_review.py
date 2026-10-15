@@ -472,33 +472,48 @@ def fake_hotkeys_gio(bus, names=None):
         bus_watch_name_on_connection=names.watch, bus_unwatch_name=names.unwatch)
 
 
+def sub_counts(bus):
+    """{signal: number of live subscriptions} on a FakeGioBus."""
+    counts = {}
+    for sig, _handler in bus.subs.values():
+        counts[sig] = counts.get(sig, 0) + 1
+    return counts
+
+
 def review4_hotkey_rebuild_unsubscribes():
-    print("\n[#4] rebuild() leaves exactly one press/release subscription pair")
+    print("\n[#4] rebuild() leaves exactly one subscription per signal and action")
     from parakeet_dictation import hotkeys as da_hotkeys
     da_hotkeys.DIAG = TEST_DIAG
     bus = FakeGioBus()
     saved_gio = da_hotkeys.Gio
     da_hotkeys.Gio = fake_hotkeys_gio(bus)
-    presses, releases = [], []
+    presses, releases, toggles = [], [], []
+    # push-to-talk: press + release; toggle: press only; one change listener.
+    want = {"globalShortcutPressed": 2, "globalShortcutReleased": 1,
+            "yourShortcutsChanged": 1}
     try:
         cfg = da_config.AppConfig()
         mgr = da_hotkeys.HotkeyManager(
-            cfg, on_toggle=lambda: None, on_start=lambda: None, on_stop=lambda: None,
-            on_pause=lambda: None, on_hold_press=lambda: presses.append(1),
-            on_hold_release=lambda: releases.append(1))
+            cfg, on_hold_press=lambda: presses.append(1),
+            on_hold_release=lambda: releases.append(1),
+            on_toggle=lambda: toggles.append(1))
         status = mgr.start()
-        check("hold mode registers cleanly and subscribes to press and release",
-              status == "" and len(bus.subs) == 2, f"status={status!r} subs={len(bus.subs)}")
+        check("both actions register cleanly, one press subscription each",
+              status == "" and sub_counts(bus) == want,
+              f"status={status!r} subs={sub_counts(bus)}")
         for _ in range(3):
             mgr.rebuild(cfg)
-        check("after three rebuilds exactly two subscriptions remain",
-              len(bus.subs) == 2, f"{len(bus.subs)} subscriptions")
-        bus.emit("globalShortcutPressed", da_hotkeys.KGlobalAccelHotkey.COMPONENT, "push-to-talk")
-        bus.emit("globalShortcutReleased", da_hotkeys.KGlobalAccelHotkey.COMPONENT, "push-to-talk")
+        check("after three rebuilds the same subscriptions remain",
+              sub_counts(bus) == want, str(sub_counts(bus)))
+        component = da_hotkeys.KGlobalAccelHotkey.COMPONENT
+        bus.emit("globalShortcutPressed", component, "push-to-talk")
+        bus.emit("globalShortcutReleased", component, "push-to-talk")
+        bus.emit("globalShortcutPressed", component, "toggle")
         check("one key press fires the handler once, not four times",
-              presses == [1] and releases == [1], f"presses={len(presses)} releases={len(releases)}")
-        check("each rebuild unregistered the previous action with kglobalaccel",
-              bus.calls.count("unRegister") == 3 and bus.calls.count("doRegister") == 4,
+              presses == [1] and releases == [1] and toggles == [1],
+              f"presses={len(presses)} releases={len(releases)} toggles={len(toggles)}")
+        check("each rebuild unregistered both actions with kglobalaccel",
+              bus.calls.count("unRegister") == 6 and bus.calls.count("doRegister") == 8,
               f"unRegister x{bus.calls.count('unRegister')}, doRegister x{bus.calls.count('doRegister')}")
         mgr.stop()
         check("stop() leaves no subscription behind", len(bus.subs) == 0, str(bus.subs))
@@ -1396,9 +1411,8 @@ def review21_kglobalaccel_restart_reregisters():
     presses = []
     try:
         mgr = da_hotkeys.HotkeyManager(
-            da_config.AppConfig(), on_toggle=lambda: None,
-            on_start=lambda: None, on_stop=lambda: None, on_pause=lambda: None,
-            on_hold_press=lambda: presses.append(1))
+            da_config.AppConfig(hotkey_toggle=""), on_hold_press=lambda: presses.append(1),
+            on_hold_release=lambda: None, on_toggle=lambda: None)
         mgr.start()
         svc = da_hotkeys.KGlobalAccelHotkey.SERVICE
         check("the manager watches the kglobalaccel bus name",
@@ -1410,8 +1424,9 @@ def review21_kglobalaccel_restart_reregisters():
         names.appear(svc)
         check("kglobalaccel coming back registers the action again",
               bus.calls.count("doRegister") == 2, f"doRegister x{bus.calls.count('doRegister')}")
-        check("with exactly one press/release subscription pair", len(bus.subs) == 2,
-              f"{len(bus.subs)} subscriptions")
+        check("with exactly one press/release subscription pair",
+              sub_counts(bus) == {"globalShortcutPressed": 1, "globalShortcutReleased": 1,
+                                  "yourShortcutsChanged": 1}, str(sub_counts(bus)))
         check("and says so in the log",
               bool(events(diag_lines()[before:], "hold_hotkey_reregistered")))
         bus.emit("globalShortcutPressed", da_hotkeys.KGlobalAccelHotkey.COMPONENT,

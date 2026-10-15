@@ -149,7 +149,83 @@ def s3_config_migration():
               f"{c.hotkey_hold!r} {c.hotkey_toggle!r} {canon}")
 
 
-SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration}
+class FakeBus:
+    def __init__(self):
+        self.calls, self.subs, self.unsubs = [], {}, []
+        self._next = 1
+
+    def signal_subscribe(self, _svc, _iface, signal, _path, _arg0, _flags, handler):
+        sid = self._next
+        self._next += 1
+        self.subs[sid] = (signal, handler)
+        return sid
+
+    def signal_unsubscribe(self, sid):
+        self.unsubs.append(sid)
+        self.subs.pop(sid, None)
+
+
+def s4_hotkeys_two_actions():
+    print("\n[4] hotkeys: hold + toggle registered with kglobalaccel, no pynput")
+    from types import SimpleNamespace
+    from gi.repository import Gio, GLib
+    from parakeet_dictation import hotkeys as hk, config as cfgmod, shortcuts as sc
+    bus = FakeBus()
+    calls = []
+
+    def fake_call(_bus, _svc, path, iface, method, params, reply_type=None, _t=0):
+        calls.append((method, params.unpack() if params is not None else None))
+        if method == "globalShortcutAvailable":
+            return GLib.Variant("(b)", (True,))
+        if method == "getComponent":
+            return GLib.Variant("(o)", ("/component/parakeet_dictation",))
+        if method == "setShortcutKeys":
+            return GLib.Variant("(a(ai))", ([],))
+        return None
+
+    saved = (hk.Gio, hk.call_sync)
+    hk.Gio = SimpleNamespace(
+        bus_get_sync=lambda *_a: bus, BusType=Gio.BusType, DBusSignalFlags=Gio.DBusSignalFlags,
+        BusNameWatcherFlags=Gio.BusNameWatcherFlags,
+        bus_watch_name_on_connection=lambda *a: 7, bus_unwatch_name=lambda *_a: None)
+    hk.call_sync = fake_call
+    pressed, released, toggled, changed = [], [], [], []
+    try:
+        mgr = hk.HotkeyManager(cfgmod.AppConfig(), on_hold_press=lambda: pressed.append(1),
+                               on_hold_release=lambda: released.append(1),
+                               on_toggle=lambda: toggled.append(1),
+                               on_binding_changed=lambda k, b: changed.append((k, b)))
+        status = mgr.start()
+        check("start() is clean", status == "", status)
+        regs = [p[0][1] for m, p in calls if m == "doRegister"]
+        check("both actions registered", regs == ["push-to-talk", "toggle"], str(regs))
+        keys = [p[1][0][0][0] for m, p in calls if m == "setShortcutKeys"]
+        check("Insert and Meta+Insert bound",
+              keys == [sc.qt_key_sequence("Insert"), sc.qt_key_sequence("Meta+Insert")], str(keys))
+        press = [h for s, h in bus.subs.values() if s == "globalShortcutPressed"]
+        for h in press:
+            h(None, None, None, None, None, GLib.Variant("(ssx)", ("parakeet-dictation", "toggle", 0)))
+            h(None, None, None, None, None, GLib.Variant("(ssx)", ("parakeet-dictation", "push-to-talk", 0)))
+        check("toggle press -> on_toggle once", len(toggled) == 1, str(toggled))
+        check("hold press -> on_hold_press once", len(pressed) == 1, str(pressed))
+        changed_handlers = [h for s, h in bus.subs.values() if s == "yourShortcutsChanged"]
+        check("listens for KDE-side changes", len(changed_handlers) == 1)
+        changed_handlers[0](None, None, None, None, None, GLib.Variant(
+            "(asa(ai))", (["parakeet-dictation", "toggle", "Parakeet Dictation", "x"],
+                          [([sc.qt_key_sequence("Meta+Alt+D")],)])))
+        check("KDE change reported as hotkey_toggle=Meta+Alt+D",
+              changed == [("hotkey_toggle", "Meta+Alt+D")], str(changed))
+        mgr.stop()
+        calls.clear()
+        status = mgr.rebuild(cfgmod.AppConfig(hotkey_toggle=""))
+        regs = [p[0][1] for m, p in calls if m == "doRegister"]
+        check("empty toggle is not registered", regs == ["push-to-talk"], str(regs))
+        check("no pynput import", "pynput" not in sys.modules)
+    finally:
+        hk.Gio, hk.call_sync = saved
+
+
+SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions}
 
 
 def main(argv):

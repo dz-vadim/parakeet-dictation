@@ -15,7 +15,6 @@ pkgbase = parakeet-dictation-git
 	depends = python-cairo
 	depends = python-numpy
 	depends = python-sounddevice
-	depends = python-pynput
 	depends = python-sherpa-onnx
 	depends = python-ten-vad
 	depends = python-requests

@@ -19,7 +19,6 @@ classifiers = [
 dependencies = [
     "sherpa-onnx>=1.12",
     "sounddevice>=0.4",
-    "pynput>=1.7",
     "numpy",
     "PyGObject",
     "pycairo",          # the overlay draws with cairo directly
