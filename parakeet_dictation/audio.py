@@ -1,6 +1,7 @@
 """Audio: beeps, device lookup, TEN VAD wrapper, loudness normalisation, block coalescing."""
 
 import math
+import sys
 from datetime import datetime
 
 import numpy as np
@@ -8,6 +9,7 @@ import sounddevice as sd
 from ten_vad import TenVad
 
 from .config import AppConfig
+from .diagnostics import DIAG
 
 SAMPLE_RATE = 16000
 
@@ -96,16 +98,40 @@ def list_input_devices() -> list[dict]:
 
 
 def resolve_audio_device(config_value: str):
-    """Convert config audio_device string to a sounddevice device index or None."""
+    """Turn the config's audio_device into a sounddevice index, or None for
+    the system default.
+
+    By NAME first — exact, then substring — because PortAudio's indexes
+    shift whenever a device is added or removed, so a stored index silently
+    picks another microphone after the next replug.  A bare number is only
+    an index for configs written that way (the settings dialog still stores
+    one).  A value that matches nothing falls back to the default and is
+    logged as device_missing — without the name, which the log never holds.
+    """
     if not config_value:
         return None
+    value = str(config_value)
     try:
-        return int(config_value)
-    except ValueError:
-        for dev in list_input_devices():
-            if config_value in dev["name"]:
-                return dev["index"]
+        devices = list_input_devices()
+    except Exception as e:           # PortAudio not initialised, say
+        DIAG.log("device_missing", reason="query_failed", err=type(e).__name__)
         return None
+    for dev in devices:
+        if dev["name"] == value:
+            return dev["index"]
+    low = value.lower()
+    for dev in devices:
+        if low in dev["name"].lower():
+            return dev["index"]
+    if value.strip().isdigit():
+        index = int(value)
+        if any(dev["index"] == index for dev in devices):
+            return index
+    DIAG.log("device_missing", legacy_index=value.strip().isdigit(),
+             inputs=len(devices))
+    print("WARNING: configured microphone not found — using the system default",
+          file=sys.stderr)
+    return None
 
 
 # ---------------------------------------------------------------------------

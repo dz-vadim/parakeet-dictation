@@ -1807,6 +1807,45 @@ def review25_mic_error_keeps_captured_speech():
     check("controller: the take still ends", ctl.gesture == "idle", ctl.gesture)
     ctl.shutdown()
 
+
+# ---------------------------------------------------------------------------
+# #26 (E2)  audio_device is matched by NAME first: PortAudio indexes shift
+#     whenever a device comes or goes, so a stored index picks a different
+#     microphone after the next replug.  A stale value falls back to the
+#     default and says so (without the device name — the log never has one).
+# ---------------------------------------------------------------------------
+
+def review26_audio_device_by_name():
+    print("\n[#26 E2] the microphone is resolved by name, index only as a fallback")
+    devices = [{"index": 0, "name": "HDA Intel PCH: ALC257 Analog (hw:0,0)", "channels": 2},
+               {"index": 3, "name": "Blue Yeti: USB Audio (hw:2,0)", "channels": 2},
+               {"index": 4, "name": "pipewire", "channels": 64},
+               {"index": 5, "name": "3", "channels": 1}]
+    saved = (da_audio.list_input_devices, getattr(da_audio, "DIAG", None))
+    da_audio.list_input_devices = lambda: devices
+    da_audio.DIAG = TEST_DIAG
+    try:
+        r = da_audio.resolve_audio_device
+        check("empty -> system default", r("") is None)
+        check("an exact name wins", r("Blue Yeti: USB Audio (hw:2,0)") == 3)
+        check("a substring of a name matches (hw suffix changed after a replug)",
+              r("Blue Yeti") == 3)
+        check("a name that is all digits is matched as a name before an index",
+              r("3") == 5, str(r("3")))
+        check("a legacy index still works when no name matches", r("4") == 4)
+        before = len(diag_lines())
+        check("a name that matches nothing falls back to the default",
+              r("Rode NT-USB") is None)
+        lines = events(diag_lines()[before:], "device_missing")
+        check("and logs device_missing", bool(lines), str(diag_lines()[before:]))
+        check("without the device name", lines and "Rode" not in lines[0], str(lines))
+        check("a stale index (no such input device) falls back to the default",
+              r("17") is None)
+    finally:
+        da_audio.list_input_devices = saved[0]
+        if saved[1] is not None:
+            da_audio.DIAG = saved[1]
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1833,7 +1872,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             22: review22_shutdown_flushes_clipboard_restore,
             23: review23_privacy,
             24: review24_late_text_is_not_pasted_into_the_next_take,
-            25: review25_mic_error_keeps_captured_speech}
+            25: review25_mic_error_keeps_captured_speech,
+            26: review26_audio_device_by_name}
 
 
 def main(argv):
