@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parakeet Dictation — макети налаштувань</title>
+<style>
+  :root { --bg: #1b1e20; --fg: #e6e8ea; --dim: #9aa0a6; --card: #232629; --line: #3b4045; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 15px/1.5 "Noto Sans", system-ui, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 36px 0 8px; }
+  p { color: var(--dim); margin: 0 0 12px; }
+  figure { margin: 0 0 20px; }
+  img { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); display: block; }
+  figcaption { color: var(--dim); font-size: 13px; margin-top: 6px; }
+  .row { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .note { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+          padding: 12px 14px; color: var(--dim); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Parakeet Dictation — макети меню й налаштувань</h1>
+  <p>Відрендерено справжнім GTK3 з темою Breeze-Dark (одноразовий прототип, не робочий код).
+     Специфікація: <code>docs/superpowers/specs/2026-10-15-tray-settings-redesign-design.md</code>.</p>
+  <div class="note">Меню в треї малює сама Plasma, тож шрифти й відступи там будуть трохи інші —
+     тут показано склад і порядок пунктів.</div>
+
+  <h2>Меню в треї</h2>
+  <div class="row">
+    <figure><img src="tray-idle.png" alt="Меню в стані очікування">
+      <figcaption>Очікування</figcaption></figure>
+    <figure><img src="tray-recording.png" alt="Меню під час запису">
+      <figcaption>Під час запису: «Зупинити» і «Пауза»</figcaption></figure>
+  </div>
+
+  <h2>Налаштування — Загальні</h2>
+  <figure><img src="settings-general.png" alt="Сторінка Загальні"></figure>
+
+  <h2>Налаштування — Розпізнавання</h2>
+  <figure><img src="settings-recognition.png" alt="Сторінка Розпізнавання"></figure>
+
+  <h2>Налаштування — Вставлення</h2>
+  <figure><img src="settings-output.png" alt="Сторінка Вставлення"></figure>
+
+  <h2>Налаштування — Додатково</h2>
+  <figure><img src="settings-advanced.png" alt="Сторінка Додатково"></figure>
+
+  <h2>Налаштування — Про програму</h2>
+  <figure><img src="settings-about.png" alt="Сторінка Про програму"></figure>
+</main>
+</body>
+</html>

@@ -1,7 +1,7 @@
 # Tray menu and Settings redesign
 
 Date: 2026-10-15
-Status: draft for review
+Status: approved by the user 2026-10-15
 
 ## Goal
 
@@ -32,13 +32,23 @@ two actions instead of one:
 
 | action id      | config key       | default       | behaviour                    |
 |----------------|------------------|---------------|------------------------------|
-| `push-to-talk` | `hotkey_hold`    | `Meta+Z`      | press starts, release stops  |
-| `toggle`       | `hotkey_toggle`  | `Meta+Alt+D`  | press starts / stops         |
+| `push-to-talk` | `hotkey_hold`    | `Insert`      | press starts, release stops  |
+| `toggle`       | `hotkey_toggle`  | `Meta+Insert` | press starts / stops         |
 
 Both are always active (no `hotkey_mode` switch any more) and both show up
 in System Settings > Shortcuts under "Parakeet Dictation", where the user
 can also change them. An empty binding disables that action. The existing
 conflict report ("X is already held by Y") covers both.
+
+Defaults are the same for everyone (decided 2026-10-15): a single key for
+push-to-talk has no modifier that can still be held when the paste chord
+goes out, so the take can paste almost at once. Both bindings stay user-
+configurable (Settings > General, or System Settings > Shortcuts).
+
+Paste hold-off: `paste_min_delay_ms` (default 350) now applies only when the
+shortcut that ended the take contains a modifier (Meta+Insert, Meta+Z, …);
+a bare key such as Insert ends the take with no extra wait. The config key
+keeps its meaning for modifier shortcuts.
 
 Pause has no shortcut: it is a tray item while recording, and SIGUSR2 stays
 for scripts. SIGUSR1 (toggle) stays, so `parakeet-toggle` keeps working.
@@ -52,15 +62,18 @@ of `enforce()` rewriting the config.
 Config migration (in `AppConfig.load`, logged):
 
 - `hotkey_start`, `hotkey_stop`, `hotkey_pause`, `hotkey_mode` are dropped;
-- a `hotkey_toggle` in pynput syntax (contains `<`) becomes `Meta+Alt+D`;
+- a `hotkey_toggle` in pynput syntax (contains `<`) becomes `Meta+Insert`;
+- a `hotkey_hold` still at the old default `Meta+Z` becomes `Insert`
+  (a user-chosen binding is kept);
 - this machine: the hand-made `[services]` Meta+Alt+D entry for
-  `parakeet-dictation-toggle.desktop` would conflict with the new action, so
-  the plan removes it (with a backup) as a one-off step outside the code.
+  `parakeet-dictation-toggle.desktop` is no longer needed once the toggle
+  action exists, so the plan removes it (with a backup) as a one-off step
+  outside the code.
 
 ## 2. Tray menu
 
 ```
-Start Dictation              Meta+Alt+D     (while recording: Stop Dictation)
+Start Dictation              Meta+Insert    (while recording: Stop Dictation)
 Pause                                       (only while recording; Resume when paused)
 ────────────────────────
 Microphone            ▸   ◉ System default / ○ <each input device>
@@ -74,7 +87,7 @@ Quit
 - No status row and no disabled items. State is the icon colour (grey
   idle, green listening, red paused — already shipped) plus the indicator
   title, which Plasma shows as the tooltip: "Parakeet Dictation — ready ·
-  hold Meta+Z to talk" / "— listening" / "— paused".
+  hold Insert to talk" / "— listening" / "— paused".
 - The shortcut shown is the configured `hotkey_toggle`; when it is empty
   the label has no shortcut. Shortcuts are rendered in KDE notation.
 - Radio items (`Gtk.RadioMenuItem`), not "✓" prefixes. Models that are not
@@ -117,6 +130,9 @@ Pages and their options:
   - Microphone: device combo (stored by **name**, not PortAudio index).
   - Sounds: "Beep at start and end" + volume slider; "Quiet hours" with
     from/to hours (`night_*`).
+  - Interface language: "System default" / "Українська" / "English"
+    (`ui_language`: `system` | `uk` | `en`, default `system`); takes effect
+    after a restart of the app, which the page says.
   - System: "Start at login" (writes/removes
     `~/.config/autostart/parakeet-dictation.desktop`).
 - **Recognition**
@@ -124,13 +140,15 @@ Pages and their options:
     language combo, "Show live preview" (`preview`).
   - "Remove filler words" (`filter_fillers`).
 - **Text Output**
+  - "When to insert text": "When dictation ends" (default, `end_of_take`) /
+    "After each phrase" (`per_segment`); a note says push-to-talk always
+    inserts when the key is released.
   - "Keep dictated text on the clipboard" (`keep_on_clipboard`) with a one-
     line explanation.
   - On-screen indicator: show (`overlay`), position (`overlay_position`).
   - Tray icon style (`tray_icon_style`) as three icon radio buttons.
 - **Advanced**
   - Performance: CPU threads, "Pause that ends a phrase" (`vad_min_silence`),
-    "Insert after each phrase (start/stop mode)" (`insert_mode`).
   - Pasting: delay after key release (`paste_min_delay_ms`), method
     (`paste_transport`), terminal window classes (editable list).
   - Diagnostics: "Write a diagnostics log" (`diagnostics`) + "Open log
@@ -181,6 +199,9 @@ are deleted.
   nor a venv needs gettext tools). `tools/update-translations.sh` extracts
   strings (`xgettext`), merges (`msgmerge`) and compiles (`msgfmt`); a test
   fails if the `.mo` is older than the `.po` or a `.po` entry is fuzzy.
+- `ui_language` overrides the locale: `uk`/`en` load that catalogue
+  regardless of `LANG` (the author's machine runs `en_US` but wants
+  Ukrainian); `system` follows `LANGUAGE`/`LC_MESSAGES`/`LANG`.
 - Shortcut names stay in KDE notation (Meta, Alt, Ctrl), as KDE itself does
   in the Ukrainian locale.
 
@@ -209,10 +230,16 @@ are deleted.
 - Manual check on Plasma (user): menu in both languages, each settings
   page, both shortcuts via System Settings > Shortcuts, Start at login.
 
-## Decisions for the user to confirm
+## Decisions (user, 2026-10-15)
 
-1. Default hold key stays `Meta+Z` for new users (your machine keeps
-   `Insert`); default toggle `Meta+Alt+D`.
-2. `per_segment` insertion survives only for start/stop takes, under
-   Advanced. (Alternative: remove it entirely.)
-3. The main window is removed; nothing replaces it.
+1. Defaults for everyone: hold `Insert`, start/stop `Meta+Insert`, both
+   configurable.
+2. `insert_mode` keeps `end_of_take` as the default and is a visible option
+   on the Text Output page (applies to start/stop takes).
+3. The main window ("Show Window": status, Start button, microphone and
+   model combos, a broken streaming checkbox) is removed with nothing in
+   its place.
+4. An interface-language option is added (General page).
+
+Mockups (rendered with GTK3 + Breeze-Dark):
+`docs/design/2026-10-15-settings-mockups/index.html`.
