@@ -21,14 +21,23 @@ def _box(*children):
     return box
 
 
+def _launch(win, argv) -> bool:
+    """Start a helper program; a missing one is reported, not raised."""
+    try:
+        subprocess.Popen(argv, start_new_session=True)
+    except OSError as e:
+        win._problem(_("Could not start {program}: {error}")
+                     .format(program=argv[0], error=e.strerror or e))
+    return True
+
+
 def general(win):
     shortcuts = Section(_("Shortcuts"))
     shortcuts.row(_("Hold to talk:"), win.bind_shortcut("hotkey_hold"))
     shortcuts.row(_("Start / stop:"), win.bind_shortcut("hotkey_toggle"),
                   _("Click, then press the shortcut. Backspace disables it, Esc cancels."))
     kde = Gtk.LinkButton.new_with_label("", _("Open KDE shortcut settings…"))
-    kde.connect("activate-link", lambda *_a: (subprocess.Popen(
-        ["systemsettings", "kcm_keys"], start_new_session=True), True)[1])
+    kde.connect("activate-link", lambda *_a: _launch(win, ["systemsettings", "kcm_keys"]))
     shortcuts.row(None, kde)
 
     mic = Section(_("Microphone"))
@@ -251,7 +260,7 @@ def advanced(win):
     row = Gtk.Box(spacing=8)
     row.pack_start(win.bind_check("diagnostics", _("Write a diagnostics log")), False, False, 0)
     folder = Gtk.Button(label=_("Open folder"))
-    folder.connect("clicked", lambda _b: subprocess.Popen(["xdg-open", str(DATA_DIR)], start_new_session=True))
+    folder.connect("clicked", lambda _b: _launch(win, ["xdg-open", str(DATA_DIR)]))
     row.pack_start(folder, False, False, 0)
     diag.row(None, row, _("Timings and character counts only. Text and audio are never recorded."))
     return _box(perf, paste, diag)

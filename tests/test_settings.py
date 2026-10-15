@@ -378,6 +378,7 @@ def s7_settings_draft():
 def s8_autostart():
     print("\n[8] autostart file")
     import os, tempfile
+    from gi.repository import GLib
     from parakeet_dictation import autostart
     saved = os.environ.get("XDG_CONFIG_HOME")
     with tempfile.TemporaryDirectory() as tmp:
@@ -393,6 +394,35 @@ def s8_autostart():
             check("Hidden=true counts as off", not autostart.is_enabled())
             autostart.set_enabled(False)
             check("removed", not autostart.desktop_path().exists())
+            # D1: Exec= quoting per the desktop-entry spec.
+            saved_dir = autostart.APP_DIR
+            try:
+                for sub, want in (
+                        ("plain", "{d}/start.sh"),
+                        ("My Apps", '"{d}/start.sh"'),
+                        ("a$b`c\"d", '"{q}/start.sh"'),
+                        ("back\\slash", '"{q}/start.sh"'),
+                        ("100%", "{p}/start.sh")):
+                    d = Path(tmp) / sub
+                    d.mkdir()
+                    (d / "start.sh").write_text("")
+                    autostart.APP_DIR = d
+                    q = str(d)
+                    for ch in ('\\', '"', "`", "$"):
+                        q = q.replace(ch, "\\" + ch)
+                    q = q.replace("\\", "\\\\")           # then the string-value escape
+                    expect = want.format(d=d, q=q, p=str(d).replace("%", "%%"))
+                    got = autostart.exec_line()
+                    check(f"D1: Exec for {sub!r}", got == expect, f"{got} (want {expect})")
+                    # Cross-check with GLib: string-value unescape, then argv parse.
+                    kf = GLib.KeyFile()
+                    data = f"[Desktop Entry]\nExec={got}\n"
+                    kf.load_from_data(data, len(data.encode()), GLib.KeyFileFlags.NONE)
+                    argv = GLib.shell_parse_argv(kf.get_string("Desktop Entry", "Exec").replace("%%", "%"))[1]
+                    check(f"D1: GLib reads {sub!r} back as the one path",
+                          argv == [str(d / "start.sh")], str(argv))
+            finally:
+                autostart.APP_DIR = saved_dir
         finally:
             if saved is None:
                 os.environ.pop("XDG_CONFIG_HOME", None)
@@ -505,6 +535,12 @@ def s10_settings_window():
     i18n.setup("en")
     state = {"cfg": cfgmod.AppConfig(), "applied": []}
 
+    def walk(w):
+        yield w
+        if isinstance(w, Gtk.Container):
+            for c in w.get_children():
+                yield from walk(c)
+
     def on_apply(cfg):
         state["applied"].append(cfg)
         state["cfg"] = cfg
@@ -532,6 +568,27 @@ def s10_settings_window():
           win.draft.get("num_threads") == cfgmod.AppConfig().num_threads
           and win.draft.get("overlay_position") == "bottom")
     win.destroy()
+    # D4: no systemsettings binary is reported, not raised from a signal handler.
+    from parakeet_dictation.ui.settings import pages
+    win = SettingsWindow(lambda: state["cfg"], load_model_profiles(), on_apply, lambda: None)
+    link = next(x for x in walk(win) if isinstance(x, Gtk.LinkButton))
+    launched = []
+
+    def no_binary(argv, **_kw):
+        launched.append(argv)
+        raise FileNotFoundError(2, "No such file or directory", argv[0])
+    saved_popen = pages.subprocess.Popen
+    pages.subprocess.Popen = no_binary
+    try:
+        handled = link.emit("activate-link")
+    finally:
+        pages.subprocess.Popen = saved_popen
+    check("D4: the link tried systemsettings", launched and launched[0][0] == "systemsettings", str(launched))
+    check("D4: the click is handled", handled is True, repr(handled))
+    check("D4: a missing systemsettings is shown in the InfoBar",
+          "systemsettings" in win.info_label.get_text() and win.info.get_visible(),
+          win.info_label.get_text())
+    win.destroy()
     # I2: a failed save keeps the draft (Apply retries it) and shows the message.
     state["cfg"] = cfgmod.AppConfig()
     win = SettingsWindow(lambda: state["cfg"], load_model_profiles(), on_apply, lambda: None)
@@ -556,11 +613,6 @@ def s10_settings_window():
     win = SettingsWindow(lambda: cfgmod.AppConfig(beep_volume=0.0), load_model_profiles(),
                          on_apply, lambda: None)
 
-    def walk(w):
-        yield w
-        if isinstance(w, Gtk.Container):
-            for c in w.get_children():
-                yield from walk(c)
     ranges = {tuple(s.get_range()) for s in walk(win) if isinstance(s, Gtk.SpinButton)}
     for key in ("num_threads", "vad_min_silence", "paste_min_delay_ms"):
         lo, hi = cfgmod._RANGES[key]

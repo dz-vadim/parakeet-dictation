@@ -12,9 +12,22 @@ def desktop_path() -> Path:
     return root / "autostart" / f"{APP_ID}.desktop"
 
 
+# Characters that force an Exec= argument into double quotes (desktop-entry
+# spec, "The Exec key"); inside them " ` $ and \ take a backslash.
+_EXEC_RESERVED = set(" \t\n\"'\\><~|&;$*?#()`")
+
+
+def _exec_arg(arg: str) -> str:
+    arg = arg.replace("%", "%%")                 # % starts a field code
+    if any(c in _EXEC_RESERVED for c in arg):
+        arg = '"' + "".join("\\" + c if c in '"`$\\' else c for c in arg) + '"'
+    # Exec is also a string value, whose own escaping is undone first.
+    return arg.replace("\\", "\\\\")
+
+
 def exec_line() -> str:
     start = APP_DIR / "start.sh"
-    return str(start) if start.is_file() else APP_ID
+    return _exec_arg(str(start)) if start.is_file() else APP_ID
 
 
 def is_enabled() -> bool:
