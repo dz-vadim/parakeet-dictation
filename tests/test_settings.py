@@ -389,7 +389,7 @@ def s9_widgets():
     print("\n[9] widgets: shortcut button state machine, device choices (GTK)")
     import gi
     gi.require_version("Gtk", "3.0")
-    from gi.repository import Gtk
+    from gi.repository import Gtk, Gdk
     from parakeet_dictation import i18n
     from parakeet_dictation.ui.settings import widgets as w
     i18n.setup("en")
@@ -408,15 +408,67 @@ def s9_widgets():
     b.clicked()
     b.feed("BackSpace", frozenset())
     check("Backspace disables", got[-1] == "" and b.get_label() == "None", b.get_label())
+    b.clicked()
+    n = len(got)
+    b.emit("focus-out-event", Gdk.Event.new(Gdk.EventType.FOCUS_CHANGE))
+    check("focus loss cancels the capture", b.get_label() == "None" and len(got) == n
+          and b.feed("Insert", frozenset()) == "idle", b.get_label())
     ch = w.device_choices("USB Mic", ["Built-in"])
     check("device choices keep a missing saved mic",
           ch == [("", "System default"), ("Built-in", "Built-in"), ("USB Mic", "USB Mic (not connected)")], str(ch))
     check("numeric legacy value is not shown as a name", w.device_choices("7", ["A"])[-1] == ("A", "A"))
 
 
+def s10_settings_window():
+    print("\n[10] settings window: pages, Apply/Cancel/Defaults, duplicate shortcut (GTK)")
+    import gi
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gtk
+    from parakeet_dictation import config as cfgmod, i18n
+    from parakeet_dictation.models import load_model_profiles
+    from parakeet_dictation.ui.settings import SettingsWindow
+    i18n.setup("en")
+    state = {"cfg": cfgmod.AppConfig(), "applied": []}
+
+    def on_apply(cfg):
+        state["applied"].append(cfg)
+        state["cfg"] = cfg
+        return ""
+
+    win = SettingsWindow(lambda: state["cfg"], load_model_profiles(), on_apply, lambda: None)
+    for page in ("general", "recognition", "output", "advanced", "about"):
+        win.show_page(page)
+        check(f"page {page} shown", win.stack.get_visible_child_name() == page)
+    check("Apply starts disabled", not win.apply_button.get_sensitive())
+    win.draft.set("overlay_position", "top"); win._refresh_buttons()
+    check("an edit enables Apply", win.apply_button.get_sensitive())
+    check("apply() succeeds", win.apply())
+    check("on_apply got the edit", state["applied"][-1].overlay_position == "top")
+    check("Apply disabled again", not win.apply_button.get_sensitive())
+    win.draft.set("hotkey_toggle", "Insert"); win._refresh_buttons()
+    check("same shortcut twice is refused", not win.apply()
+          and "already used" in win.info_label.get_text(), win.info_label.get_text())
+    win.cancel()
+    check("cancel discards the draft", win.draft.get("hotkey_toggle") == state["cfg"].hotkey_toggle)
+    win.show_page("advanced")
+    win.draft.set("num_threads", 9); win.draft.set("overlay_position", "bottom")
+    win.defaults()
+    check("Defaults resets the current page only",
+          win.draft.get("num_threads") == cfgmod.AppConfig().num_threads
+          and win.draft.get("overlay_position") == "bottom")
+    win.destroy()
+    odd = cfgmod.AppConfig(insert_mode="per_segment", tray_icon_style="parrot", beep_volume=0.3,
+                           overlay_position="top", ui_language="uk")
+    win = SettingsWindow(lambda: odd, load_model_profiles(), on_apply, lambda: None)
+    check("building from a non-default config leaves the draft clean",
+          not win.draft.dirty and not win.apply_button.get_sensitive(), str(win.draft.changed_keys()))
+    win.destroy()
+
+
 SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions,
             5: s5_controller_take_kind, 6: s6_menu_model,
-            7: s7_settings_draft, 8: s8_autostart, 9: s9_widgets}
+            7: s7_settings_draft, 8: s8_autostart, 9: s9_widgets,
+            10: s10_settings_window}
 
 
 def main(argv):

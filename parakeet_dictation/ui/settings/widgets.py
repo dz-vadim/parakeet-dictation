@@ -69,6 +69,7 @@ class ShortcutButton(Gtk.Button):
         self._handler = 0
         self._show()
         self.connect("clicked", self._on_clicked)
+        self.connect("focus-out-event", self._on_focus_out)
 
     @property
     def binding(self) -> str:
@@ -94,16 +95,26 @@ class ShortcutButton(Gtk.Button):
         self.feed(name, gdk_mods(event.state))
         return True
 
+    def _on_focus_out(self, *_a):
+        """Clicking elsewhere ends a capture as if Escape was pressed."""
+        if self._listening:
+            self._stop_listening()
+            self._show()
+        return False
+
+    def _stop_listening(self):
+        self._listening = False
+        if self._handler:
+            self.disconnect(self._handler)
+            self._handler = 0
+
     def feed(self, keyname: str, mods: frozenset) -> str:
         if not self._listening:
             return "idle"
         status, binding = shortcuts.capture(keyname, mods)
         if status in ("wait", "reject"):
             return status
-        self._listening = False
-        if self._handler:
-            self.disconnect(self._handler)
-            self._handler = 0
+        self._stop_listening()
         if status == "done":
             self._binding = binding
             self._on_change(binding)

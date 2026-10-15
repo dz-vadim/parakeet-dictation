@@ -66,3 +66,214 @@ msgstr "Немає"
 
 msgid "Press a shortcut…"
 msgstr "Натисніть комбінацію…"
+
+msgid "{app} — Settings"
+msgstr "{app} — Налаштування"
+
+msgid "General"
+msgstr "Загальні"
+
+msgid "Recognition"
+msgstr "Розпізнавання"
+
+msgid "Text Output"
+msgstr "Вставлення"
+
+msgid "Advanced"
+msgstr "Додатково"
+
+msgid "_Defaults"
+msgstr "_Типові значення"
+
+msgid "_OK"
+msgstr "_OK"
+
+msgid "_Apply"
+msgstr "_Застосувати"
+
+msgid "_Cancel"
+msgstr "_Скасувати"
+
+msgid "{key} is already used for Hold to talk — choose another Start / stop shortcut."
+msgstr "{key} уже використовується для «Утримувати, щоб говорити» — виберіть іншу комбінацію клавіш для «Почати / зупинити»."
+
+msgid "Could not change Start at login: {error}"
+msgstr "Не вдалося змінити запуск під час входу в систему: {error}"
+
+msgid "Shortcuts"
+msgstr "Комбінації клавіш"
+
+msgid "Hold to talk:"
+msgstr "Утримувати, щоб говорити:"
+
+msgid "Start / stop:"
+msgstr "Почати / зупинити:"
+
+msgid "Click, then press the shortcut. Backspace disables it, Esc cancels."
+msgstr "Натисніть кнопку, потім потрібну комбінацію клавіш. Backspace — вимкнути, Esc — скасувати."
+
+msgid "Open KDE shortcut settings…"
+msgstr "Відкрити налаштування комбінацій клавіш KDE…"
+
+msgid "Device:"
+msgstr "Пристрій:"
+
+msgid "Sounds"
+msgstr "Звуки"
+
+msgid "Beep at start and end"
+msgstr "Сигнал на початку й у кінці"
+
+msgid "Quiet hours, no beeps:"
+msgstr "Тихі години, без сигналів:"
+
+msgid "System"
+msgstr "Система"
+
+msgid "Interface language:"
+msgstr "Мова інтерфейсу:"
+
+msgid "Takes effect after the app restarts."
+msgstr "Набуде чинності після перезапуску програми."
+
+msgid "Start at login"
+msgstr "Запускати під час входу в систему"
+
+msgid "In use"
+msgstr "Використовується"
+
+msgid "Use"
+msgstr "Використовувати"
+
+msgid "Download"
+msgstr "Завантажити"
+
+msgid "Download failed: {error}"
+msgstr "Не вдалося завантажити: {error}"
+
+msgid "Text"
+msgstr "Текст"
+
+msgid "Language:"
+msgstr "Мова:"
+
+msgid "Automatic (Parakeet) / English"
+msgstr "Автоматично (Parakeet) / English"
+
+msgid "Parakeet detects the language itself; this matters for Canary only."
+msgstr "Parakeet визначає мову сам; це важливо лише для Canary."
+
+msgid "Show the text live while dictating"
+msgstr "Показувати текст наживо під час диктування"
+
+msgid "Remove filler words (“um”, “uh”)"
+msgstr "Прибирати слова-паразити («е-е», «м-м»)"
+
+msgid "When to insert text"
+msgstr "Коли вставляти текст"
+
+msgid "When dictation ends"
+msgstr "Коли диктування закінчено"
+
+msgid "After each phrase"
+msgstr "Після кожної фрази"
+
+msgid "Hold to talk always inserts when the key is released."
+msgstr "У режимі «Утримувати, щоб говорити» текст завжди вставляється, коли клавішу відпущено."
+
+msgid "Clipboard"
+msgstr "Буфер обміну"
+
+msgid "Keep dictated text on the clipboard"
+msgstr "Залишати продиктований текст у буфері обміну"
+
+msgid "If pasting fails, the text can still be pasted by hand with Ctrl+V."
+msgstr "Якщо вставити не вдалося, текст можна вставити вручну через Ctrl+V."
+
+msgid "On-screen indicator"
+msgstr "Індикатор на екрані"
+
+msgid "Show the recording indicator"
+msgstr "Показувати індикатор запису"
+
+msgid "Position:"
+msgstr "Розташування:"
+
+msgid "Bottom of the screen"
+msgstr "Унизу екрана"
+
+msgid "Top of the screen"
+msgstr "Угорі екрана"
+
+msgid "Tray icon"
+msgstr "Значок у треї"
+
+msgid "Parrot"
+msgstr "Папуга"
+
+msgid "Waveform"
+msgstr "Звукова хвиля"
+
+msgid "Performance"
+msgstr "Продуктивність"
+
+msgid "CPU threads:"
+msgstr "Потоки процесора:"
+
+msgid "s"
+msgstr "с"
+
+msgid "Pause that ends a phrase:"
+msgstr "Пауза, що завершує фразу:"
+
+msgid "Pasting"
+msgstr "Параметри вставлення"
+
+msgid "ms"
+msgstr "мс"
+
+msgid "Delay after a shortcut with Meta/Ctrl/Alt:"
+msgstr "Затримка після комбінації з Meta/Ctrl/Alt:"
+
+msgid "Only when the take was ended by a shortcut with a modifier."
+msgstr "Лише коли диктування завершено комбінацією клавіш із модифікатором."
+
+msgid "Key press method:"
+msgstr "Спосіб натискання клавіш:"
+
+msgid "Automatic (portal, else ydotool)"
+msgstr "Автоматично (портал, інакше ydotool)"
+
+msgid "KDE portal"
+msgstr "Портал KDE"
+
+msgid "Terminals (Ctrl+Shift+V):"
+msgstr "Термінали (Ctrl+Shift+V):"
+
+msgid "Window classes, comma-separated."
+msgstr "Класи вікон через кому."
+
+msgid "Diagnostics"
+msgstr "Діагностика"
+
+msgid "Write a diagnostics log"
+msgstr "Вести журнал діагностики"
+
+msgid "Open folder"
+msgstr "Відкрити теку"
+
+msgid "Timings and character counts only. Text and audio are never recorded."
+msgstr "Лише тривалості та кількість символів. Текст і звук ніколи не записуються."
+
+msgid ""
+"Offline dictation for KDE Plasma: hold a key, speak, release.\n"
+"Recognition runs on this computer; nothing is sent over the network."
+msgstr ""
+"Офлайн-диктування для KDE Plasma: утримуйте клавішу, говоріть, відпустіть.\n"
+"Розпізнавання працює на цьому комп'ютері; нічого не надсилається в мережу."
+
+msgid "MIT licence · © Daniel Rosehill, Vadym Dziuba"
+msgstr "Ліцензія MIT · © Daniel Rosehill, Vadym Dziuba"
+
+msgid "Parakeet TDT model — NVIDIA, CC-BY-4.0 · TEN VAD — Agora, Apache-2.0 with additional conditions"
+msgstr "Модель Parakeet TDT — NVIDIA, CC-BY-4.0 · TEN VAD — Agora, Apache-2.0 з додатковими умовами"
