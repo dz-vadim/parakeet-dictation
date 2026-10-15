@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "parakeet-dictation"
 version = "2.0.0"
 description = "On-device push-to-talk voice dictation for KDE Plasma Wayland (sherpa-onnx)"
+readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -21,7 +22,10 @@ dependencies = [
     "pynput>=1.7",
     "numpy",
     "PyGObject",
+    "pycairo",          # the overlay draws with cairo directly
     "ten-vad>=1.0.6",
+    "requests",         # model downloads (models.py)
+    "tqdm",             # progress bar of `python -m parakeet_dictation.models`
 ]
 
 [project.urls]

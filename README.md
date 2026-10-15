@@ -12,7 +12,7 @@ far. The paste chord is chosen from the focused window's class (a resident KWin 
 it) and pressed as keysyms through the xdg-desktop-portal RemoteDesktop session, so it works
 under any keyboard layout. A tray icon gives access to start/stop, model switching and settings.
 
-This is a fork of [danielrosehill/parakeet-dictation](https://github.com/danielrosehill/parakeet-dictation),
+This is a fork of [danielrosehill/Parakeet-Type-Ubuntu](https://github.com/danielrosehill/Parakeet-Type-Ubuntu),
 the upstream single-file Ubuntu toggle app. This repository is
 [dz-vadim/parakeet-dictation](https://github.com/dz-vadim/parakeet-dictation), version 2.0.0.
 
@@ -334,7 +334,7 @@ controller; `app.py` is wiring only. `parakeet_dictation/data/focus.js` is the K
 
 ## Credits and licence
 
-Upstream: [Daniel Rosehill, parakeet-dictation](https://github.com/danielrosehill/parakeet-dictation),
+Upstream: [Daniel Rosehill, Parakeet-Type-Ubuntu](https://github.com/danielrosehill/Parakeet-Type-Ubuntu),
 whose README states the MIT licence; this tree carries no LICENSE file of its own. This fork narrows
 the scope to KDE Plasma Wayland push-to-talk with Ukrainian and English dictation; the pipeline,
 insertion path, overlay and tests in this repository were measured and verified on one user's voice
