@@ -15,7 +15,9 @@ is fetched for it.
 
 import hashlib
 import json
+import os
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -84,6 +86,18 @@ def _download_file(url: str, dest: Path, on_progress_bytes=None, sha256=None):
     models.json has one), the digest matches — so a truncated, corrupted or
     swapped download is never mistaken for a model.
     """
+    with _DOWNLOAD_LOCK:
+        _download_file_locked(url, dest, on_progress_bytes, sha256)
+
+
+# One download at a time, process-wide: the welcome dialog, the settings
+# dialog and "download all" can each start one, and two transfers of the
+# same file used to share `<dest>.part` — the one that failed unlinked the
+# other's temp file, and a rename could land bytes mixed from both.
+_DOWNLOAD_LOCK = threading.Lock()
+
+
+def _download_file_locked(url, dest: Path, on_progress_bytes, sha256):
     import requests
 
     resp = requests.get(url, stream=True, timeout=(15, 60))
@@ -91,9 +105,14 @@ def _download_file(url: str, dest: Path, on_progress_bytes=None, sha256=None):
     total = int(resp.headers.get("content-length", 0))
     downloaded = 0
     digest = hashlib.sha256()
-    tmp = dest.with_suffix(dest.suffix + ".part")
+    # A temp name of its own in the destination directory (same filesystem,
+    # so the rename is atomic), even against another process — the CLI
+    # downloader running next to the app, say.
+    fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=f".{dest.name}.",
+                                    suffix=".part")
+    tmp = Path(tmp_name)
     try:
-        with open(tmp, "wb") as f:
+        with os.fdopen(fd, "wb") as f:
             for chunk in resp.iter_content(1024 * 1024):
                 f.write(chunk)
                 digest.update(chunk)
@@ -103,7 +122,8 @@ def _download_file(url: str, dest: Path, on_progress_bytes=None, sha256=None):
         if sha256 and digest.hexdigest() != sha256.lower():
             raise ValueError(f"checksum mismatch for {dest.name}: expected "
                              f"{sha256[:12]}…, got {digest.hexdigest()[:12]}…")
-        tmp.rename(dest)
+        os.chmod(tmp, 0o644)              # mkstemp creates 0600
+        os.replace(tmp, dest)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
@@ -204,7 +224,7 @@ def _download_all_models(profiles_data: dict, on_progress, on_done):
 
 def download_file(url: str, dest: Path, sha256=None):
     """CLI download with a progress bar, through the same atomic path the
-    GUI uses: the bytes land in `<dest>.part` and are renamed only once the
+    GUI uses: the bytes land in a temp file and are renamed only once the
     transfer is complete.  Writing `dest` directly, as this did, let a
     truncated download pass the exists()/size checks and fail later inside
     sherpa-onnx."""

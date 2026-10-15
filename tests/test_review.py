@@ -2099,6 +2099,68 @@ def review30_model_downloads_pinned_and_verified():
               [p.name for p in Path(tmp).iterdir()] == [dest.name],
               str([p.name for p in Path(tmp).iterdir()]))
 
+
+# ---------------------------------------------------------------------------
+# #31 (E4)  Two downloads of the same file (the welcome dialog and the
+#     settings dialog, or the GUI and the CLI) shared one `<dest>.part`:
+#     the one that failed unlinked the other's temp file, and the survivor's
+#     rename could land a file mixed from both.
+# ---------------------------------------------------------------------------
+
+def review31_concurrent_downloads_do_not_collide():
+    print("\n[#31 E4] concurrent downloads use their own temp files, one at a time")
+    from parakeet_dictation import models as da_models
+    payload = bytes(range(256)) * 4096                 # 1 MiB
+    for b_fails in (True, False):
+        _race_once(da_models, payload, b_fails)
+
+
+def _race_once(da_models, payload, b_fails):
+    calls = []
+
+    def get(*_a, **_k):
+        # A: 16 chunks x 20 ms.  B starts 80 ms later at 10 ms a chunk and,
+        # when it fails, does so 3/4 in — while A is still writing.
+        calls.append(1)
+        first = len(calls) == 1
+        return _FakeHTTP(payload, delay=0.02 if first else 0.01,
+                         fail=b_fails and not first)
+
+    tag = "B fails" if b_fails else "both healthy"
+    with tempfile.TemporaryDirectory(prefix="parakeet-race-") as tmp:
+        dest = Path(tmp) / "encoder.int8.onnx"
+        res = {}
+
+        def run(name):
+            try:
+                da_models._download_file("u", dest)
+                res[name] = "ok"
+            except Exception as e:      # noqa: BLE001
+                res[name] = repr(e)
+
+        def race():
+            a = threading.Thread(target=run, args=("A",))
+            a.start()
+            time.sleep(0.08)
+            b = threading.Thread(target=run, args=("B",))
+            b.start()
+            a.join()
+            b.join()
+
+        _with_fake_requests(get, race)
+        check(f"{tag}: the first download succeeds", res.get("A") == "ok", str(res))
+        if b_fails:
+            check(f"{tag}: the broken one fails on its own error",
+                  "ConnectionError" in res.get("B", ""), str(res))
+        else:
+            check(f"{tag}: the second one succeeds too", res.get("B") == "ok", str(res))
+        check(f"{tag}: the file on disk is the complete, unmixed payload",
+              dest.exists() and dest.read_bytes() == payload,
+              f"exists={dest.exists()}")
+        check(f"{tag}: no temp file is left behind",
+              [p.name for p in Path(tmp).iterdir()] == [dest.name],
+              str([p.name for p in Path(tmp).iterdir()]))
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -2130,7 +2192,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             27: review27_int16_clip_and_beep_errors,
             28: review28_enforce_validates_enums_and_ranges,
             29: review29_config_save_atomic_and_xdg,
-            30: review30_model_downloads_pinned_and_verified}
+            30: review30_model_downloads_pinned_and_verified,
+            31: review31_concurrent_downloads_do_not_collide}
 
 
 def main(argv):
