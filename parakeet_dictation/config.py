@@ -214,6 +214,16 @@ class AppConfig:
             forced.append("insert_mode")
             report("config_forced", key="insert_mode", value="end_of_take",
                    reason="hold_mode")
+        defaults = AppConfig.__dataclass_fields__
+        for key in ("hotkey_toggle", "hotkey_start", "hotkey_stop", "hotkey_pause"):
+            value = getattr(self, key)
+            if key == "hotkey_pause" and value == "":
+                continue           # an empty pause binding means "none"
+            if not _pynput_binding_ok(value):
+                setattr(self, key, defaults[key].default)
+                forced.append(key)
+                report("config_forced", key=key, value=defaults[key].default,
+                       reason="unparseable_binding")
         if self.tray_icon_style not in ("mic", "parrot", "wave"):
             self.tray_icon_style = "mic"
             forced.append("tray_icon_style")
@@ -297,6 +307,23 @@ def _coerce(field_type, value):
     if field_type is dict:
         return isinstance(value, dict), value
     return True, value
+
+
+def _pynput_binding_ok(binding) -> bool:
+    """Whether pynput can parse `binding` (its GlobalHotKeys raises on one it
+    cannot).  True when pynput is not importable: nothing to check against."""
+    if not isinstance(binding, str):
+        return False
+    try:
+        from pynput import keyboard
+        parse = keyboard.HotKey.parse
+    except Exception:          # no pynput, or no backend for this session
+        return True
+    try:
+        parse(binding)
+    except ValueError:
+        return False
+    return True
 
 
 def _back_up_broken(path: Path):

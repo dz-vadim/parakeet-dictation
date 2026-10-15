@@ -223,6 +223,22 @@ class HotkeyManager:
         if self._config.hotkey_pause:
             bindings[self._config.hotkey_pause] = lambda: GLib.idle_add(self._on_pause)
 
+        # GlobalHotKeys raises ValueError on the first binding it cannot
+        # parse ("Meta+Z" typed into a pynput field), which used to take the
+        # whole app down at every launch.  A bad one is dropped and named.
+        bad = []
+        for binding in list(bindings):
+            try:
+                keyboard.HotKey.parse(binding)
+            except ValueError:
+                bad.append(binding)
+                del bindings[binding]
+        if bad:
+            DIAG.log("hotkey_invalid", count=len(bad))
+            problem = (f"{', '.join(bad)} is not a valid shortcut — "
+                       f"set it again in Settings")
+            status = f"{status}; {problem}" if status else problem
+
         self._listener = keyboard.GlobalHotKeys(bindings)
         self._listener.daemon = True
         self._listener.start()

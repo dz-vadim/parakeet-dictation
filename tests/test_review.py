@@ -457,7 +457,8 @@ def review4_hotkey_rebuild_unsubscribes():
         bus_get_sync=lambda *_a: bus, BusType=Gio.BusType,
         DBusCallFlags=Gio.DBusCallFlags, DBusSignalFlags=Gio.DBusSignalFlags)
     sys.modules["pynput"] = SimpleNamespace(
-        keyboard=SimpleNamespace(GlobalHotKeys=FakeGlobalHotKeys))
+        keyboard=SimpleNamespace(GlobalHotKeys=FakeGlobalHotKeys,
+                                 HotKey=SimpleNamespace(parse=lambda b: [b])))
     presses, releases = [], []
     try:
         cfg = da_config.AppConfig(hotkey_mode="hold")
@@ -1311,6 +1312,64 @@ def review18_portal_error_mid_chord():
         (da_insert.subprocess.run, da_insert.shutil.which,
          da_insert.portal_keyboard) = saved
 
+
+# ---------------------------------------------------------------------------
+# #19 (C4)  A binding pynput cannot parse ("Meta+Z" in hotkey_toggle) used to
+#     raise ValueError out of keyboard.GlobalHotKeys and kill the app at every
+#     launch.  The manager drops it and says so; enforce() resets it.
+# ---------------------------------------------------------------------------
+
+def review19_bad_pynput_binding():
+    print("\n[#19 C4] a binding pynput rejects neither crashes nor survives a load")
+    from pynput import keyboard
+    from parakeet_dictation import hotkeys as da_hotkeys
+    da_hotkeys.DIAG = TEST_DIAG
+    built = []
+
+    class StrictGlobalHotKeys(FakeGlobalHotKeys):
+        def __init__(self, bindings):
+            super().__init__(bindings)
+            for b in bindings:
+                keyboard.HotKey.parse(b)          # raises like the real one
+            built.append(dict(bindings))
+
+    saved = keyboard.GlobalHotKeys
+    keyboard.GlobalHotKeys = StrictGlobalHotKeys
+    try:
+        cfg = da_config.AppConfig(hotkey_mode="toggle")
+        cfg.hotkey_toggle = "Meta+Z"               # what enforce() would refuse
+        mgr = da_hotkeys.HotkeyManager(cfg, on_toggle=lambda: None, on_start=lambda: None,
+                                       on_stop=lambda: None, on_pause=lambda: None)
+        try:
+            status, err = mgr.start(), None
+        except Exception as e:          # noqa: BLE001 — that IS the bug
+            status, err = None, e
+        check("start() does not raise on an unparseable binding", err is None, repr(err))
+        check("it returns a status naming the binding",
+              bool(status) and "Meta+Z" in status, repr(status))
+        check("the valid bindings are still registered",
+              bool(built) and list(built[-1]) == [cfg.hotkey_pause], str(built))
+        mgr.stop()
+    finally:
+        keyboard.GlobalHotKeys = saved
+
+    events_seen = []
+    cfg = da_config.AppConfig(hotkey_toggle="Meta+Z", hotkey_start="<ctrl>+",
+                              hotkey_stop="<ctrl>+8", hotkey_pause="")
+    with redirect_stderr(io.StringIO()):
+        forced = cfg.enforce(lambda ev, **kw: events_seen.append((ev, kw)))
+    defaults = da_config.AppConfig()
+    check("enforce() resets an unparseable hotkey_toggle to its default",
+          cfg.hotkey_toggle == defaults.hotkey_toggle and "hotkey_toggle" in forced,
+          f"{cfg.hotkey_toggle!r} {forced}")
+    check("and hotkey_start", cfg.hotkey_start == defaults.hotkey_start, cfg.hotkey_start)
+    check("a valid binding and an empty (disabled) pause are kept",
+          cfg.hotkey_stop == "<ctrl>+8" and cfg.hotkey_pause == "",
+          f"{cfg.hotkey_stop!r} {cfg.hotkey_pause!r}")
+    check("each reset is logged with the key it changed",
+          {kw.get("key") for ev, kw in events_seen if ev == "config_forced"}
+          >= {"hotkey_toggle", "hotkey_start"}, str(events_seen))
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1330,7 +1389,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             15: review15_cleanups_single_source_tables,
             16: review16_press_cancels_deferred_stop,
             17: review17_wl_copy_timeout_is_reported,
-            18: review18_portal_error_mid_chord}
+            18: review18_portal_error_mid_chord,
+            19: review19_bad_pynput_binding}
 
 
 def main(argv):
