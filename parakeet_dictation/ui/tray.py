@@ -3,7 +3,7 @@
 import copy
 from pathlib import Path
 
-from gi.repository import AyatanaAppIndicator3, Gtk
+from gi.repository import AyatanaAppIndicator3, GLib, Gtk
 
 from ..audio import list_input_devices
 from ..config import APP_ID, AppConfig
@@ -21,6 +21,9 @@ class TrayIcon:
         self._controller = controller
         self._hotkey_mgr = hotkey_mgr
         self._settings = None
+        self._state_shown = None
+        self._items = None
+        self._menu = None
         self._indicator = AyatanaAppIndicator3.Indicator.new(
             APP_ID, "audio-input-microphone-muted",
             AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS)
@@ -28,7 +31,7 @@ class TrayIcon:
         if self._custom_icons:
             self._indicator.set_icon_theme_path(str(_ICONS_DIR))
         self._indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.ACTIVE)
-        controller.set_status_callback(lambda _text: self.update_ui())
+        controller.set_status_callback(self._on_status)
         self.update_ui()
 
     # -- state ---------------------------------------------------------------
@@ -43,8 +46,15 @@ class TrayIcon:
             return f"parakeet-{self._controller.config.tray_icon_style}-{icon_state}"
         return _LEGACY_ICON[icon_state]
 
+    def _on_status(self, _text):
+        # Status text (streaming partials, "Listening...") arrives many times
+        # per take; neither the icon, the tooltip nor the menu depend on it.
+        if self._state() != self._state_shown:
+            self.update_ui()
+
     def update_ui(self):
         state = self._state()
+        self._state_shown = state
         cfg = self._controller.config
         self._indicator.set_icon_full(self._icon_name(state), state)
         self._indicator.set_title(menu_model.tooltip(state, cfg))
@@ -55,7 +65,14 @@ class TrayIcon:
         profiles = self._controller.profiles
         downloaded = {m for m in profiles if _is_model_downloaded(m, profiles)}
         items = menu_model.build_menu(state, cfg, profiles, downloaded, devices)
-        self._indicator.set_menu(self._render(items))
+        if items == self._items:
+            return          # re-exporting would collapse a menu the user has open
+        old, self._items = self._menu, items
+        self._menu = self._render(items)
+        self._indicator.set_menu(self._menu)
+        if old is not None:
+            # Later: this may run from one of the old menu's own item handlers.
+            GLib.idle_add(old.destroy)
 
     # -- rendering -------------------------------------------------------------
     def _render(self, items) -> Gtk.Menu:

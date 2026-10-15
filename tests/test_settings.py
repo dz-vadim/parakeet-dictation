@@ -506,12 +506,12 @@ def s11_tray():
     i18n.setup("en")
 
     class FakeIndicator:
-        def __init__(self): self.menu = None; self.title = ""; self.icon = None
+        def __init__(self): self.menu = None; self.title = ""; self.icon = None; self.menus = 0
         def set_icon_theme_path(self, *_a): pass
         def set_icon_full(self, name, _desc): self.icon = name
         def set_status(self, *_a): pass
         def set_title(self, t): self.title = t
-        def set_menu(self, m): self.menu = m
+        def set_menu(self, m): self.menu = m; self.menus += 1
 
     ind = FakeIndicator()
     saved = traymod.AyatanaAppIndicator3
@@ -519,13 +519,13 @@ def s11_tray():
         Indicator=SimpleNamespace(new=lambda *a: ind),
         IndicatorCategory=SimpleNamespace(APPLICATION_STATUS=0),
         IndicatorStatus=SimpleNamespace(ACTIVE=1))
-    calls = []
+    calls, status = [], []
     ctl = SimpleNamespace(config=cfgmod.AppConfig(), profiles={"desktop": {"name": "P3"}},
                           profiles_data={"profiles": {"desktop": {"name": "P3"}}},
                           is_running=False, is_paused=False,
                           toggle=lambda hold_off=True: calls.append(("toggle", hold_off)),
                           pause=lambda: calls.append(("pause",)),
-                          set_status_callback=lambda cb: None, notify=lambda m: None,
+                          set_status_callback=lambda cb: status.append(cb), notify=lambda m: None,
                           apply_config=lambda c: calls.append(("apply", c)))
     mgr = SimpleNamespace(rebuild=lambda c: "")
     try:
@@ -539,6 +539,26 @@ def s11_tray():
         t.on_binding_changed("hotkey_toggle", "Meta+Alt+D")
         check("KDE-side change applied to config", calls[-1][0] == "apply"
               and calls[-1][1].hotkey_toggle == "Meta+Alt+D")
+        # Status text (partials, "Listening...") must not rebuild the menu.
+        queries = []
+        saved_list = traymod.list_input_devices
+        traymod.list_input_devices = lambda: queries.append(1) or []
+        try:
+            before = ind.menus
+            status[-1]("Listening..."); status[-1]("partial text")
+            check("same-state status callbacks keep the menu", ind.menus == before, f"{ind.menus - before} set_menu")
+            check("...and do not query devices", not queries, str(len(queries)))
+            ctl.is_running = True
+            status[-1]("Listening..."); status[-1]("partial text")
+            check("a state change re-exports the menu once", ind.menus == before + 1, f"{ind.menus - before}")
+            check("tooltip follows the state", ind.title.endswith("listening"), ind.title)
+            ctl.is_running = False
+            status[-1]("")
+            check("back to idle re-exports it again", ind.menus == before + 2, f"{ind.menus - before}")
+            t.update_ui()
+            check("an explicit refresh with unchanged items keeps the menu", ind.menus == before + 2)
+        finally:
+            traymod.list_input_devices = saved_list
     finally:
         traymod.AyatanaAppIndicator3 = saved
 
