@@ -86,8 +86,15 @@ class TrayIcon:
                 mi = Gtk.MenuItem(label=item.label)
                 mi.set_submenu(self._render(item.children))
             elif item.kind == "radio":
+                if group is None:
+                    # A GTK radio group always has one member active.  This
+                    # one is never shown: it holds the selection when no
+                    # real choice is current (saved model not downloaded, a
+                    # legacy device index), so none looks chosen and a click
+                    # on any of them is a change that fires "toggled".
+                    group = Gtk.RadioMenuItem()
+                    menu.radio_placeholder = group
                 mi = Gtk.RadioMenuItem.new_with_label_from_widget(group, item.label)
-                group = group or mi
                 mi.set_active(item.active)
                 mi.connect("toggled", lambda w, a=item.action: w.get_active() and self._do(a))
             else:

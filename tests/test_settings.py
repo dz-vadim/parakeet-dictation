@@ -750,12 +750,66 @@ def s14_welcome_dialog():
         windows._download_all_models, windows.WelcomeDialog.show_all = saved
 
 
+def s15_tray_radio_none_active():
+    print("\n[15] tray radios with no current choice: none shown active, any click works (GTK)")
+    from types import SimpleNamespace
+    import gi
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gtk
+    from parakeet_dictation import config as cfgmod, i18n
+    from parakeet_dictation.ui import tray as traymod
+    i18n.setup("en")
+    ind = SimpleNamespace(menu=None)
+    ind.set_icon_theme_path = ind.set_icon_full = ind.set_status = ind.set_title = lambda *a: None
+    ind.set_menu = lambda m: setattr(ind, "menu", m)
+    applied = []
+    profiles = {"desktop": {"name": "P3"}, "laptop": {"name": "Canary"}, "streaming": {"name": "N"}}
+    # The saved model is not downloaded; the saved mic is a legacy device index.
+    ctl = SimpleNamespace(config=cfgmod.AppConfig(model_profile="streaming", audio_device="7"),
+                          profiles=profiles, profiles_data={"profiles": profiles},
+                          is_running=False, is_paused=False, set_status_callback=lambda cb: None,
+                          notify=lambda m: None, apply_config=lambda c: applied.append(c) or "")
+    saved = (traymod.AyatanaAppIndicator3, traymod._is_model_downloaded, traymod.list_input_devices)
+    traymod.AyatanaAppIndicator3 = SimpleNamespace(
+        Indicator=SimpleNamespace(new=lambda *a: ind),
+        IndicatorCategory=SimpleNamespace(APPLICATION_STATUS=0),
+        IndicatorStatus=SimpleNamespace(ACTIVE=1))
+    traymod._is_model_downloaded = lambda m, _p: m in ("desktop", "laptop")
+    traymod.list_input_devices = lambda: [{"name": "Built-in"}]
+    try:
+        traymod.TrayIcon(ctl, SimpleNamespace(rebuild=lambda c: ""))
+
+        def radios(label):
+            sub = next(i for i in ind.menu.get_children() if i.get_label() == label).get_submenu()
+            return [i for i in sub.get_children()
+                    if isinstance(i, Gtk.RadioMenuItem) and i.get_visible()]
+        for label in ("Model", "Microphone"):
+            shown = radios(label)
+            check(f"M7: {label}: no visible radio is active",
+                  shown and not any(i.get_active() for i in shown),
+                  str([(i.get_label(), i.get_active()) for i in shown]))
+        radios("Model")[0].activate()
+        check("M7: clicking the first model applies it",
+              applied and applied[-1].model_profile == "desktop", str([c.model_profile for c in applied]))
+        ctl.config = cfgmod.AppConfig(model_profile="streaming", audio_device="7")
+        radios("Microphone")[0].activate()
+        check("M7: clicking System default applies it",
+              applied[-1].audio_device == "", repr(applied[-1].audio_device))
+        ctl.config = cfgmod.AppConfig(model_profile="laptop", audio_device="Built-in")
+        traymod.TrayIcon(ctl, SimpleNamespace(rebuild=lambda c: ""))
+        check("M7: a current choice is still shown active",
+              [i.get_label() for i in radios("Model") if i.get_active()] == ["Canary"]
+              and [i.get_label() for i in radios("Microphone") if i.get_active()] == ["Built-in"])
+    finally:
+        traymod.AyatanaAppIndicator3, traymod._is_model_downloaded, traymod.list_input_devices = saved
+
+
 SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions,
             5: s5_controller_take_kind, 6: s6_menu_model,
             7: s7_settings_draft, 8: s8_autostart, 9: s9_widgets,
             10: s10_settings_window, 11: s11_tray,
             12: s12_catalogue_complete, 13: s13_controller_apply_config,
-            14: s14_welcome_dialog}
+            14: s14_welcome_dialog, 15: s15_tray_radio_none_active}
 
 
 def main(argv):
