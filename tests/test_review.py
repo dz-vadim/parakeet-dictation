@@ -2209,6 +2209,56 @@ def review32_legacy_migration_is_scoped():
     app_src = (HERE.parent / "parakeet_dictation" / "app.py").read_text()
     check("app.main() runs it at startup", "migrate_legacy_models(" in app_src)
 
+
+# ---------------------------------------------------------------------------
+# #33 (U2)  A long error used to be drawn on one line into a fixed 348 px
+#     pill and simply cut off.  It is sized to the text (capped by the
+#     screen), wrapped onto a second line, and stays up longer.
+# ---------------------------------------------------------------------------
+
+def review33_long_error_fits_the_pill():
+    print("\n[#33 U2] a long error message is shown whole, and long enough to read")
+    from parakeet_dictation.ui import overlay as da_overlay
+    da_overlay.DIAG = TEST_DIAG
+    ov = da_overlay.PillOverlay(da_config.AppConfig())
+    layout = getattr(ov, "_error_layout", None)
+    check("the pill can lay an error out (_error_layout)", callable(layout))
+    if not callable(layout):
+        return
+    short = "Microphone unavailable — check Settings › General"
+    lines, width, height = layout(short)
+    check("a short message keeps the usual one-line pill",
+          lines == [short] and (width, height) == (ov.ERROR_WIDTH, ov.ERROR_HEIGHT),
+          f"{lines} {width}x{height}")
+    long_msg = ("Ctrl+Alt+F12 is already held by org.kde.spectacle.desktop — "
+                "free it in System Settings > Shortcuts")
+    lines, width, height = layout(long_msg)
+    measure = ov._measure_text
+    usable = width - ov.ERROR_TEXT_X - ov.ERROR_PAD_R
+    check("a long message gets a wider and/or taller pill",
+          width > ov.ERROR_WIDTH or height > ov.ERROR_HEIGHT, f"{width}x{height}")
+    check("every line fits inside the pill",
+          all(measure(l) <= usable + 0.5 for l in lines),
+          str([(l, round(measure(l))) for l in lines]))
+    check("no word is lost", " ".join(lines) == long_msg, str(lines))
+    check("at most two lines", 1 <= len(lines) <= 2, str(lines))
+    check("never wider than the screen allows", width <= ov._error_max_width(),
+          f"{width} > {ov._error_max_width()}")
+    huge = "word " * 200
+    lines, width, height = layout(huge.strip())
+    check("text beyond two lines is ellipsised, not drawn off the pill",
+          len(lines) == 2 and lines[-1].endswith("…")
+          and all(measure(l) <= width - ov.ERROR_TEXT_X - ov.ERROR_PAD_R + 0.5 for l in lines),
+          str([round(measure(l)) for l in lines]))
+    check("the display time grows with the length of the message",
+          ov._error_ms(short) == ov.ERROR_MS and ov._error_ms(long_msg) > ov.ERROR_MS
+          and ov._error_ms(huge) <= ov.ERROR_MAX_MS,
+          f"{ov._error_ms(short)} / {ov._error_ms(long_msg)} / {ov._error_ms(huge)}")
+    ov.set_state("error", long_msg)
+    w, h = ov._size()
+    check("set_state('error') uses that layout", (w, h) == layout(long_msg)[1:], f"{w}x{h}")
+    ov.shutdown()
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -2242,7 +2292,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             29: review29_config_save_atomic_and_xdg,
             30: review30_model_downloads_pinned_and_verified,
             31: review31_concurrent_downloads_do_not_collide,
-            32: review32_legacy_migration_is_scoped}
+            32: review32_legacy_migration_is_scoped,
+            33: review33_long_error_fits_the_pill}
 
 
 def main(argv):

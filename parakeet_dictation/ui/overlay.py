@@ -413,9 +413,15 @@ class PillOverlay:
     HEIGHT = 36
     PREPARING_WIDTH = 214
     SUCCESS_WIDTH = 112
-    ERROR_WIDTH = 348
+    ERROR_WIDTH = 348          # the minimum; a longer message widens it
     ERROR_HEIGHT = 44
+    ERROR_HEIGHT_2 = 62        # two lines
     ERROR_RADIUS = 10          # not a capsule: the shape is the category
+    ERROR_MAX_WIDTH = 640      # then the screen (minus margins) caps it
+    ERROR_TEXT_X = 36          # after the red dot
+    ERROR_PAD_R = 16
+    ERROR_LINE_H = 17
+    ERROR_FONT = 11.5
 
     BARS = 12
     BAR_W = 3
@@ -428,7 +434,9 @@ class PillOverlay:
     FRAME_MS = 50              # ~20 Hz, while the meter or spinner moves
     PAUSED_FRAME_MS = 1000     # paused: only the clock changes
     SUCCESS_MS = 500
-    ERROR_MS = 3000
+    ERROR_MS = 3000            # for a short message; longer ones get more
+    ERROR_MS_PER_CHAR = 60     # ~16 characters a second of reading time
+    ERROR_MAX_MS = 8000
 
     RED = (0.94, 0.27, 0.27)
     GREEN = (0.30, 0.82, 0.45)
@@ -719,7 +727,8 @@ class PillOverlay:
             self._frozen = self._elapsed()
             self._dismiss_source = GLib.timeout_add(self.SUCCESS_MS, self._auto_hide)
         elif state == "error":
-            self._dismiss_source = GLib.timeout_add(self.ERROR_MS, self._auto_hide)
+            self._dismiss_source = GLib.timeout_add(self._error_ms(message),
+                                                    self._auto_hide)
         self._show()
 
     def push_level(self, rms: float, speech: bool):
@@ -759,7 +768,8 @@ class PillOverlay:
 
     def _size(self):
         if self._state == "error":
-            return self.ERROR_WIDTH, self.ERROR_HEIGHT
+            _lines, width, height = self._error_layout(self._error_text())
+            return width, height
         if self._state == "preparing":
             return self.PREPARING_WIDTH, self.HEIGHT
         if self._state == "success":
@@ -945,6 +955,90 @@ class PillOverlay:
 
     def _draw_error(self, cr, width, height):
         cy = height / 2
+        lines, _w, _h = self._error_layout(self._error_text())
         self._dot(cr, 20, cy, self.RED)
-        message = self._message or "Dictation failed"
-        self._text(cr, 36, cy + 4, message, rgba=(1, 1, 1, 0.92))
+        top = cy + 4 - (len(lines) - 1) * self.ERROR_LINE_H / 2
+        for i, line in enumerate(lines):
+            self._text(cr, self.ERROR_TEXT_X, top + i * self.ERROR_LINE_H, line,
+                       size=self.ERROR_FONT, rgba=(1, 1, 1, 0.92))
+
+    # --- error layout ----------------------------------------------------
+    #
+    # The error pill was a fixed 348 px with the message drawn on one line,
+    # so anything longer (a shortcut conflict names the binding AND the
+    # component holding it) was cut off mid-word.  It is now as wide as the
+    # text needs, up to ERROR_MAX_WIDTH or the screen, then two lines; only
+    # past that is the end ellipsised.
+
+    def _error_text(self) -> str:
+        return self._message or "Dictation failed"
+
+    def _error_ms(self, message: str) -> int:
+        """How long an error stays up: long enough to read it."""
+        extra = max(0, len(message or "") - 60) * self.ERROR_MS_PER_CHAR
+        return int(min(self.ERROR_MAX_MS, self.ERROR_MS + extra))
+
+    def _measure_text(self, text: str) -> float:
+        cr = getattr(self, "_measure_cr", None)
+        if cr is None:
+            cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1))
+            cr.select_font_face("Sans", cairo.FontSlant.NORMAL, cairo.FontWeight.NORMAL)
+            cr.set_font_size(self.ERROR_FONT)
+            self._measure_cr = cr
+        return cr.text_extents(text)[4]
+
+    def _error_max_width(self) -> int:
+        width = self.ERROR_MAX_WIDTH
+        try:
+            display = Gdk.Display.get_default()
+            monitor = (display.get_primary_monitor() or display.get_monitor(0)
+                       if display is not None else None)
+            if monitor is not None:
+                width = min(width, monitor.get_geometry().width - 2 * self.MARGIN)
+        except Exception:
+            pass
+        return max(self.ERROR_WIDTH, int(width))
+
+    def _wrap(self, words, usable):
+        lines, line = [], ""
+        for word in words:
+            trial = f"{line} {word}" if line else word
+            if line and self._measure_text(trial) > usable:
+                lines.append(line)
+                line = word
+            else:
+                line = trial
+        if line:
+            lines.append(line)
+        return lines
+
+    def _ellipsize(self, text, usable):
+        if self._measure_text(text) <= usable:
+            return text
+        while text and self._measure_text(text.rstrip() + "…") > usable:
+            text = text[:-1]
+        return text.rstrip() + "…"
+
+    def _error_layout(self, message: str):
+        """(lines, width, height) for an error message."""
+        pad = self.ERROR_TEXT_X + self.ERROR_PAD_R
+        max_w = self._error_max_width()
+        need = math.ceil(self._measure_text(message) + pad)
+        if need <= self.ERROR_WIDTH:
+            return [message], self.ERROR_WIDTH, self.ERROR_HEIGHT
+        if need <= max_w:
+            return [message], need, self.ERROR_HEIGHT
+        words = message.split()
+        # Two balanced lines if they fit; the full width if they do not.
+        lines = []
+        for width in (min(max_w, math.ceil(need / 2) + pad + 24), max_w):
+            lines = self._wrap(words, width - pad)
+            if len(lines) <= 2:
+                break
+        usable = max_w - pad
+        if len(lines) > 2:
+            lines = [lines[0], " ".join(lines[1:])]
+        lines = [self._ellipsize(line, usable) for line in lines]
+        width = max(self.ERROR_WIDTH,
+                    min(max_w, math.ceil(max(self._measure_text(l) for l in lines) + pad)))
+        return lines, width, self.ERROR_HEIGHT_2 if len(lines) > 1 else self.ERROR_HEIGHT
