@@ -9,7 +9,7 @@
 
 pkgname=python-ten-vad-bin
 _name=ten_vad
-pkgver=1.0.6.8
+pkgver=1.0.6.9
 pkgrel=1
 pkgdesc="TEN VAD: low-latency, lightweight voice activity detector (Python bindings, prebuilt library)"
 arch=('x86_64')
@@ -22,7 +22,7 @@ provides=('python-ten-vad')
 conflicts=('python-ten-vad')
 options=('!strip' '!debug')
 source=("https://files.pythonhosted.org/packages/source/${_name::1}/$_name/$_name-$pkgver.tar.gz")
-sha256sums=('af1fb4fcb81b2028a20b8a4dbc5662d9f103d0d75e1d62f36f131f58f148e4d5')
+sha256sums=('0c80936314b75bbcc3c478ad45540fcd6a86b7de87147ff481faa1c9beee191e')
 
 prepare() {
   cd "$_name-$pkgver"
