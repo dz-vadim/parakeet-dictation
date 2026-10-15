@@ -289,8 +289,51 @@ def s5_controller_take_kind():
     check("signal/shortcut stop: hold-off armed", ctl._release_t > 0.0)
 
 
+def s6_menu_model():
+    print("\n[6] tray menu model")
+    from parakeet_dictation import config as cfgmod, i18n
+    from parakeet_dictation.ui import menu_model as mm
+    i18n.setup("en")
+    cfg = cfgmod.AppConfig(audio_device="WM105 Keyboard", model_profile="desktop")
+    profiles = {"desktop": {"name": "Parakeet TDT 0.6B v3 (int8)"},
+                "laptop": {"name": "Canary 180M Flash (int8)"},
+                "streaming": {"name": "Nemotron Streaming 0.6B (int8)"}}
+    items = mm.build_menu("idle", cfg, profiles, {"desktop", "laptop"}, ["WM105 Keyboard", "Built-in"])
+    labels = [i.label for i in items if i.kind != "separator"]
+    check("idle top-level order", labels == ["Start Dictation", "Microphone", "Model",
+                                             "Settings…", "About", "Quit"], str(labels))
+    check("start shows Meta+Insert", items[0].accel == "Meta+Insert")
+    check("no disabled/status rows", all(i.kind in ("action", "submenu", "separator") for i in items))
+    mic = next(i for i in items if i.label == "Microphone")
+    check("mic: default + devices, saved one active",
+          [(c.label, c.active) for c in mic.children] ==
+          [("System default", False), ("WM105 Keyboard", True), ("Built-in", False)])
+    model = next(i for i in items if i.label == "Model")
+    check("model: only downloaded + Download More…",
+          [c.label for c in model.children if c.kind != "separator"] ==
+          ["Parakeet TDT 0.6B v3 (int8)", "Canary 180M Flash (int8)", "Download More…"])
+    rec = mm.build_menu("recording", cfg, profiles, {"desktop"}, [])
+    check("recording: Stop + Pause",
+          [i.label for i in rec[:2]] == ["Stop Dictation", "Pause"]
+          and [i.action for i in rec[:2]] == ["toggle", "pause"])
+    pau = mm.build_menu("paused", cfg, profiles, {"desktop"}, [])
+    check("paused: Stop + Resume", [i.label for i in pau[:2]] == ["Stop Dictation", "Resume"])
+    cfg2 = cfgmod.AppConfig(hotkey_toggle="")
+    check("no toggle binding -> no accel", mm.build_menu("idle", cfg2, profiles, {"desktop"}, [])[0].accel == "")
+    gone = cfgmod.AppConfig(audio_device="USB Mic")
+    mic = next(i for i in mm.build_menu("idle", gone, profiles, {"desktop"}, ["Built-in"]) if i.label == "Microphone")
+    check("disconnected saved mic still listed and active",
+          ("USB Mic (not connected)", True) in [(c.label, c.active) for c in mic.children])
+    check("tooltip idle names the hold key",
+          mm.tooltip("idle", cfg) == "Parakeet Dictation — ready · hold Insert to talk", mm.tooltip("idle", cfg))
+    i18n.setup("uk")
+    check("labels are translated", mm.build_menu("idle", cfg, profiles, {"desktop"}, [])[0].label
+          == "Почати диктування")
+    i18n.setup("en")
+
+
 SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions,
-            5: s5_controller_take_kind}
+            5: s5_controller_take_kind, 6: s6_menu_model}
 
 
 def main(argv):
