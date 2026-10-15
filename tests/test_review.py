@@ -1370,6 +1370,44 @@ def review19_bad_pynput_binding():
           {kw.get("key") for ev, kw in events_seen if ev == "config_forced"}
           >= {"hotkey_toggle", "hotkey_start"}, str(events_seen))
 
+
+# ---------------------------------------------------------------------------
+# #20 (C5)  paste_min_delay_ms applies to every stop, not only to a hotkey
+#     release: a toggle / SIGUSR1 / tray stop is a key chord too.
+# ---------------------------------------------------------------------------
+
+class NotBeforeTyper(da_insert.TextTyper):
+    """Records what type_text was asked to do instead of doing it."""
+
+    def __init__(self):
+        super().__init__("clipboard")
+        self.calls = []
+
+    def type_text(self, text, target=None, on_done=None, not_before=None):
+        self.calls.append((text, not_before, time.monotonic()))
+        if on_done is not None:
+            on_done()
+
+
+def review20_stop_honours_paste_min_delay():
+    print("\n[#20 C5] an explicit stop holds the chord back like a release does")
+    ctl, eng, _ov = make_controller(hotkey_mode="toggle", paste_min_delay_ms=350)
+    typer = NotBeforeTyper()
+    ctl._typer = typer
+    ctl.toggle()
+    capture_up(ctl, eng)
+    ctl._on_final_text("toggled take")
+    t_stop = time.monotonic()
+    ctl.toggle()                                   # the stop
+    pump_until(lambda: ctl.gesture == "idle", 4000)
+    check("the take was inserted once", len(typer.calls) == 1, str(typer.calls))
+    if typer.calls:
+        _text, not_before, _t = typer.calls[0]
+        check("with a not_before ~350 ms after the stop",
+              not_before is not None and 0.3 <= not_before - t_stop <= 0.45,
+              f"not_before={'None' if not_before is None else f'{(not_before - t_stop) * 1000:.0f} ms'}")
+    ctl.shutdown()
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1390,7 +1428,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             16: review16_press_cancels_deferred_stop,
             17: review17_wl_copy_timeout_is_reported,
             18: review18_portal_error_mid_chord,
-            19: review19_bad_pynput_binding}
+            19: review19_bad_pynput_binding,
+            20: review20_stop_honours_paste_min_delay}
 
 
 def main(argv):

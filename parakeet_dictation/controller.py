@@ -255,6 +255,10 @@ class DictationController:
             return
         self._cancel_tail()
         self._focus_at_release = self._snapshot_focus("stop")
+        # A toggle shortcut, a SIGUSR1 bound to a KDE shortcut or a tray click
+        # leaves a modifier or button just as a hold release does: the chord
+        # waits paste_min_delay_ms from here too.
+        self._release_t = time.monotonic()
         self._enter(GESTURE_STOPPING, "explicit")
         self._overlay_state("processing")
         self._stop_engine_async("explicit")
