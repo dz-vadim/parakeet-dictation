@@ -102,8 +102,7 @@ def general(win):
 
     system = Section(_("System"))
     system.row(_("Interface language:"), win.bind_combo("ui_language", [
-        ("system", _("Same as the system")), ("uk", "Українська"), ("en", "English")]),
-        _("Takes effect after the app restarts."))
+        ("system", _("Same as the system")), ("uk", "Українська"), ("en", "English")]))
     login = Gtk.CheckButton(label=_("Start at login"))
     login.set_active(win.autostart_wanted)
 
@@ -293,10 +292,13 @@ def about(win):
     return box
 
 
-PAGES = [
-    ("general", _("General"), "preferences-system", general),
-    ("recognition", _("Recognition"), "audio-input-microphone", recognition),
-    ("output", _("Text Output"), "edit-paste", output),
-    ("advanced", _("Advanced"), "configure", advanced),
-    ("about", _("About"), "help-about", about),
-]
+def page_list():
+    """(page id, title, icon, builder) per page.  A function, not a module
+    constant: titles are looked up in whatever language is active now."""
+    return [
+        ("general", _("General"), "preferences-system", general),
+        ("recognition", _("Recognition"), "audio-input-microphone", recognition),
+        ("output", _("Text Output"), "edit-paste", output),
+        ("advanced", _("Advanced"), "configure", advanced),
+        ("about", _("About"), "help-about", about),
+    ]

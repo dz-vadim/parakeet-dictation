@@ -5,6 +5,7 @@ from pathlib import Path
 
 from gi.repository import AyatanaAppIndicator3, GLib, Gtk
 
+from .. import i18n
 from ..audio import list_input_devices
 from ..config import APP_ID, AppConfig
 from ..models import _is_model_downloaded
@@ -154,12 +155,36 @@ class TrayIcon:
 
         Returns (saved, problem): saved is False when the config file could
         not be written; problem joins every message for the user."""
+        language_changed = cfg.ui_language != self._controller.config.ui_language
         save_problem = self._controller.apply_config(cfg)
+        if language_changed:
+            # Before the hotkey rebuild, so KDE gets the action names in the
+            # new language too; the menu below is built in it as well.
+            i18n.setup(cfg.ui_language)
+            self._items = None            # same items, new labels: re-export
+            if self._settings is not None:
+                # Deferred: this usually runs inside the window's own Apply
+                # or OK handler, which still uses the window afterwards.
+                GLib.idle_add(self._rebuild_settings_window)
         hotkey_problem = self._hotkey_mgr.rebuild(cfg)
         problem = "; ".join(p for p in (save_problem, hotkey_problem) if p)
         self._controller.notify(problem)
         self.update_ui()
         return (not save_problem, problem)
+
+    def _rebuild_settings_window(self):
+        """Recreate the settings window in the language now active: its
+        labels are built once, in its constructor.  An open window comes
+        back on the same page; a hidden one is simply rebuilt on next open."""
+        old = self._settings
+        if old is None:
+            return False
+        page, visible = old.current_page, old.get_visible()
+        self._settings = None
+        old.destroy()
+        if visible:
+            self.open_settings(page)
+        return False
 
     def on_binding_changed(self, key: str, binding: str):
         new = copy.deepcopy(self._controller.config)

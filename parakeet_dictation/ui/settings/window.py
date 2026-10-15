@@ -43,9 +43,9 @@ class SettingsWindow(Gtk.Window):
         self.sidebar = Gtk.ListBox()
         self.sidebar.set_size_request(200, -1)
         self.stack = Gtk.Stack()
-        from .pages import PAGES
+        from .pages import page_list
         self._page_ids = []
-        for page_id, title, icon, build in PAGES:
+        for page_id, title, icon, build in page_list():
             row = Gtk.Box(spacing=10, margin=8)
             # Breeze names first; fall back for themes that lack them (Adwaita has no "configure").
             gicon = Gio.ThemedIcon.new_from_names([icon, "preferences-other"])

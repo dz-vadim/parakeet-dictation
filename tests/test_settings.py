@@ -922,12 +922,92 @@ def s15_tray_radio_none_active():
         traymod.AyatanaAppIndicator3, traymod._is_model_downloaded, traymod.list_input_devices = saved
 
 
+def s16_live_language_switch():
+    print("\n[16] a new ui_language applies at once: tray, settings window (GTK)")
+    import copy
+    from types import SimpleNamespace
+    import gi
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import GLib, Gtk
+    from parakeet_dictation import config as cfgmod, i18n
+    from parakeet_dictation.ui import tray as traymod
+    from parakeet_dictation.ui.settings import pages, window as winmod
+    i18n.setup("en")
+    saved_present = winmod.SettingsWindow.present
+    winmod.SettingsWindow.present = lambda self: None   # never map a real window
+
+    class FakeIndicator:
+        def __init__(self): self.menu = None; self.title = ""
+        def set_icon_theme_path(self, *_a): pass
+        def set_icon_full(self, *_a): pass
+        def set_status(self, *_a): pass
+        def set_title(self, t): self.title = t
+        def set_menu(self, m): self.menu = m
+
+    ind = FakeIndicator()
+    saved = traymod.AyatanaAppIndicator3
+    traymod.AyatanaAppIndicator3 = SimpleNamespace(
+        Indicator=SimpleNamespace(new=lambda *a: ind),
+        IndicatorCategory=SimpleNamespace(APPLICATION_STATUS=0),
+        IndicatorStatus=SimpleNamespace(ACTIVE=1))
+    ctl = SimpleNamespace(config=cfgmod.AppConfig(ui_language="en"),
+                          profiles={"desktop": {"name": "P3"}},
+                          profiles_data={"profiles": {"desktop": {"name": "P3"}}},
+                          is_running=False, is_paused=False,
+                          set_status_callback=lambda cb: None, notify=lambda m: None)
+    ctl.apply_config = lambda c: setattr(ctl, "config", c) or ""
+    mgr = SimpleNamespace(rebuild=lambda c: "")
+
+    def first_label():
+        return ind.menu.get_children()[0].get_label()
+
+    def pump():
+        ctx = GLib.MainContext.default()
+        for _ in range(20):
+            while ctx.pending():
+                ctx.iteration(False)
+
+    try:
+        t = traymod.TrayIcon(ctl, mgr)
+        check("starts in English", first_label().startswith("Start Dictation"), first_label())
+        t.open_settings("advanced")
+        old = t._settings
+        old.get_visible = lambda: True        # as if the user had it open
+        new = copy.deepcopy(ctl.config)
+        new.ui_language = "uk"
+        t.apply_settings(new)
+        pump()
+        check("tray menu switched without a restart",
+              first_label().startswith("Почати диктування"), first_label())
+        check("tooltip switched", "готово" in ind.title, ind.title)
+        check("settings window rebuilt in Ukrainian on the same page",
+              t._settings is not None and t._settings is not old
+              and "Налаштування" in t._settings.get_title()
+              and t._settings.current_page == "advanced",
+              f"{t._settings and t._settings.get_title()} {t._settings and t._settings.current_page}")
+        titles = [p[1] for p in pages.page_list()]
+        check("page titles are looked up per call", titles[0] == "Загальні", str(titles))
+        hidden = t._settings
+        hidden.get_visible = lambda: False
+        back = copy.deepcopy(ctl.config)
+        back.ui_language = "en"
+        t.apply_settings(back)
+        pump()
+        check("a hidden window is dropped, rebuilt on next open",
+              t._settings is None and first_label().startswith("Start Dictation"), str(t._settings))
+    finally:
+        traymod.AyatanaAppIndicator3 = saved
+        winmod.SettingsWindow.present = saved_present
+        i18n.setup("en")
+
+
 SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions,
             5: s5_controller_take_kind, 6: s6_menu_model,
             7: s7_settings_draft, 8: s8_autostart, 9: s9_widgets,
             10: s10_settings_window, 11: s11_tray,
             12: s12_catalogue_complete, 13: s13_controller_apply_config,
-            14: s14_welcome_dialog, 15: s15_tray_radio_none_active}
+            14: s14_welcome_dialog, 15: s15_tray_radio_none_active,
+            16: s16_live_language_switch}
 
 
 def main(argv):

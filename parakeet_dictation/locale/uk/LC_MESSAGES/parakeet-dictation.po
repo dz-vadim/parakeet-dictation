@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: parakeet-dictation\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-16 01:45+0300\n"
+"POT-Creation-Date: 2026-10-16 02:46+0300\n"
 "PO-Revision-Date: 2026-10-16 00:00+0000\n"
 "Last-Translator: Parakeet Dictation\n"
 "Language-Team: Ukrainian\n"
@@ -156,12 +156,12 @@ msgstr "Пауза"
 
 #: parakeet_dictation/ui/menu_model.py:51
 #: parakeet_dictation/ui/settings/pages.py:43
-#: parakeet_dictation/ui/settings/pages.py:219
+#: parakeet_dictation/ui/settings/pages.py:218
 msgid "Microphone"
 msgstr "Мікрофон"
 
 #: parakeet_dictation/ui/menu_model.py:52
-#: parakeet_dictation/ui/settings/pages.py:120
+#: parakeet_dictation/ui/settings/pages.py:119
 msgid "Model"
 msgstr "Модель"
 
@@ -170,7 +170,7 @@ msgid "Settings…"
 msgstr "Налаштування…"
 
 #: parakeet_dictation/ui/menu_model.py:55
-#: parakeet_dictation/ui/settings/pages.py:301
+#: parakeet_dictation/ui/settings/pages.py:303
 msgid "About"
 msgstr "Про програму"
 
@@ -255,203 +255,199 @@ msgid "Same as the system"
 msgstr "Як у системі"
 
 #: parakeet_dictation/ui/settings/pages.py:106
-msgid "Takes effect after the app restarts."
-msgstr "Набуде чинності після перезапуску програми."
-
-#: parakeet_dictation/ui/settings/pages.py:107
 msgid "Start at login"
 msgstr "Запускати під час входу в систему"
 
-#: parakeet_dictation/ui/settings/pages.py:136
+#: parakeet_dictation/ui/settings/pages.py:135
 msgid "Best accuracy, 25 European languages. ~639 MB download, ~2 GB RAM."
 msgstr ""
 "Найвища точність, 25 європейських мов. Завантаження ~639 МБ, ~2 ГБ пам'яті."
 
-#: parakeet_dictation/ui/settings/pages.py:137
+#: parakeet_dictation/ui/settings/pages.py:136
 msgid "Lightweight, 4 languages (EN/ES/DE/FR). ~198 MB download, ~500 MB RAM."
 msgstr ""
 "Легка модель, 4 мови (EN/ES/DE/FR). Завантаження ~198 МБ, ~500 МБ пам'яті."
 
-#: parakeet_dictation/ui/settings/pages.py:138
+#: parakeet_dictation/ui/settings/pages.py:137
 msgid "True real-time streaming, English only. ~631 MB download, ~2 GB RAM."
 msgstr ""
 "Справжнє потокове розпізнавання, лише англійська. Завантаження ~631 МБ, ~2 "
 "ГБ пам'яті."
 
-#: parakeet_dictation/ui/settings/pages.py:151
+#: parakeet_dictation/ui/settings/pages.py:150
 msgid "In use"
 msgstr "Використовується"
 
-#: parakeet_dictation/ui/settings/pages.py:153
+#: parakeet_dictation/ui/settings/pages.py:152
 msgid "Use"
 msgstr "Використовувати"
 
-#: parakeet_dictation/ui/settings/pages.py:157
+#: parakeet_dictation/ui/settings/pages.py:156
 msgid "Download"
 msgstr "Завантажити"
 
-#: parakeet_dictation/ui/settings/pages.py:182
+#: parakeet_dictation/ui/settings/pages.py:181
 #: parakeet_dictation/ui/windows.py:122
 #, python-brace-format
 msgid "Download failed: {error}"
 msgstr "Не вдалося завантажити: {error}"
 
-#: parakeet_dictation/ui/settings/pages.py:192
+#: parakeet_dictation/ui/settings/pages.py:191
 msgid "Text"
 msgstr "Текст"
 
-#: parakeet_dictation/ui/settings/pages.py:193
+#: parakeet_dictation/ui/settings/pages.py:192
 msgid "Language:"
 msgstr "Мова:"
 
-#: parakeet_dictation/ui/settings/pages.py:194
+#: parakeet_dictation/ui/settings/pages.py:193
 msgid "Automatic (Parakeet) / English"
 msgstr "Автоматично (Parakeet) / English"
 
-#: parakeet_dictation/ui/settings/pages.py:196
+#: parakeet_dictation/ui/settings/pages.py:195
 msgid "Parakeet detects the language itself; this matters for Canary only."
 msgstr "Parakeet визначає мову сам; це важливо лише для Canary."
 
-#: parakeet_dictation/ui/settings/pages.py:197
+#: parakeet_dictation/ui/settings/pages.py:196
 msgid "Show the text live while dictating"
 msgstr "Показувати текст наживо під час диктування"
 
-#: parakeet_dictation/ui/settings/pages.py:198
+#: parakeet_dictation/ui/settings/pages.py:197
 msgid "Remove filler words (“um”, “uh”)"
 msgstr "Прибирати слова-паразити («е-е», «м-м»)"
 
-#: parakeet_dictation/ui/settings/pages.py:203
+#: parakeet_dictation/ui/settings/pages.py:202
 msgid "When to insert text"
 msgstr "Коли вставляти текст"
 
-#: parakeet_dictation/ui/settings/pages.py:205
+#: parakeet_dictation/ui/settings/pages.py:204
 msgid "When dictation ends"
 msgstr "Коли диктування закінчено"
 
-#: parakeet_dictation/ui/settings/pages.py:206
+#: parakeet_dictation/ui/settings/pages.py:205
 msgid "After each phrase"
 msgstr "Після кожної фрази"
 
-#: parakeet_dictation/ui/settings/pages.py:207
+#: parakeet_dictation/ui/settings/pages.py:206
 msgid "Hold to talk always inserts when the key is released."
 msgstr ""
 "У режимі «Утримувати, щоб говорити» текст завжди вставляється, коли клавішу "
 "відпущено."
 
-#: parakeet_dictation/ui/settings/pages.py:208
+#: parakeet_dictation/ui/settings/pages.py:207
 msgid "Clipboard"
 msgstr "Буфер обміну"
 
-#: parakeet_dictation/ui/settings/pages.py:209
+#: parakeet_dictation/ui/settings/pages.py:208
 msgid "Keep dictated text on the clipboard"
 msgstr "Залишати продиктований текст у буфері обміну"
 
-#: parakeet_dictation/ui/settings/pages.py:210
+#: parakeet_dictation/ui/settings/pages.py:209
 msgid "If pasting fails, the text can still be pasted by hand with Ctrl+V."
 msgstr "Якщо вставити не вдалося, текст можна вставити вручну через Ctrl+V."
 
-#: parakeet_dictation/ui/settings/pages.py:211
+#: parakeet_dictation/ui/settings/pages.py:210
 msgid "On-screen indicator"
 msgstr "Індикатор на екрані"
 
-#: parakeet_dictation/ui/settings/pages.py:212
+#: parakeet_dictation/ui/settings/pages.py:211
 msgid "Show the recording indicator"
 msgstr "Показувати індикатор запису"
 
-#: parakeet_dictation/ui/settings/pages.py:213
+#: parakeet_dictation/ui/settings/pages.py:212
 msgid "Position:"
 msgstr "Розташування:"
 
-#: parakeet_dictation/ui/settings/pages.py:214
+#: parakeet_dictation/ui/settings/pages.py:213
 msgid "Bottom of the screen"
 msgstr "Унизу екрана"
 
-#: parakeet_dictation/ui/settings/pages.py:214
+#: parakeet_dictation/ui/settings/pages.py:213
 msgid "Top of the screen"
 msgstr "Угорі екрана"
 
-#: parakeet_dictation/ui/settings/pages.py:215
+#: parakeet_dictation/ui/settings/pages.py:214
 msgid "Tray icon"
 msgstr "Значок у треї"
 
-#: parakeet_dictation/ui/settings/pages.py:219
+#: parakeet_dictation/ui/settings/pages.py:218
 msgid "Parrot"
 msgstr "Папуга"
 
-#: parakeet_dictation/ui/settings/pages.py:219
+#: parakeet_dictation/ui/settings/pages.py:218
 msgid "Waveform"
 msgstr "Звукова хвиля"
 
-#: parakeet_dictation/ui/settings/pages.py:236
+#: parakeet_dictation/ui/settings/pages.py:235
 msgid "Performance"
 msgstr "Продуктивність"
 
-#: parakeet_dictation/ui/settings/pages.py:237
+#: parakeet_dictation/ui/settings/pages.py:236
 msgid "CPU threads:"
 msgstr "Потоки процесора:"
 
-#: parakeet_dictation/ui/settings/pages.py:240
+#: parakeet_dictation/ui/settings/pages.py:239
 msgid "s"
 msgstr "с"
 
-#: parakeet_dictation/ui/settings/pages.py:241
+#: parakeet_dictation/ui/settings/pages.py:240
 msgid "Pause that ends a phrase:"
 msgstr "Пауза, що завершує фразу:"
 
-#: parakeet_dictation/ui/settings/pages.py:242
+#: parakeet_dictation/ui/settings/pages.py:241
 msgid "Pasting"
 msgstr "Параметри вставлення"
 
-#: parakeet_dictation/ui/settings/pages.py:245
+#: parakeet_dictation/ui/settings/pages.py:244
 msgid "ms"
 msgstr "мс"
 
-#: parakeet_dictation/ui/settings/pages.py:246
+#: parakeet_dictation/ui/settings/pages.py:245
 msgid "Delay after a shortcut with Meta/Ctrl/Alt:"
 msgstr "Затримка після комбінації з Meta/Ctrl/Alt:"
 
-#: parakeet_dictation/ui/settings/pages.py:247
+#: parakeet_dictation/ui/settings/pages.py:246
 msgid "Only when the take was ended by a shortcut with a modifier."
 msgstr "Лише коли диктування завершено комбінацією клавіш із модифікатором."
 
-#: parakeet_dictation/ui/settings/pages.py:248
+#: parakeet_dictation/ui/settings/pages.py:247
 msgid "Key press method:"
 msgstr "Спосіб натискання клавіш:"
 
-#: parakeet_dictation/ui/settings/pages.py:249
+#: parakeet_dictation/ui/settings/pages.py:248
 msgid "Automatic (portal, else ydotool)"
 msgstr "Автоматично (портал, інакше ydotool)"
 
-#: parakeet_dictation/ui/settings/pages.py:249
+#: parakeet_dictation/ui/settings/pages.py:248
 msgid "KDE portal"
 msgstr "Портал KDE"
 
-#: parakeet_dictation/ui/settings/pages.py:258
+#: parakeet_dictation/ui/settings/pages.py:257
 msgid "Terminals (Ctrl+Shift+V):"
 msgstr "Термінали (Ctrl+Shift+V):"
 
-#: parakeet_dictation/ui/settings/pages.py:258
+#: parakeet_dictation/ui/settings/pages.py:257
 msgid "Window classes, comma-separated."
 msgstr "Класи вікон через кому."
 
-#: parakeet_dictation/ui/settings/pages.py:259
+#: parakeet_dictation/ui/settings/pages.py:258
 msgid "Diagnostics"
 msgstr "Діагностика"
 
-#: parakeet_dictation/ui/settings/pages.py:261
+#: parakeet_dictation/ui/settings/pages.py:260
 msgid "Write a diagnostics log"
 msgstr "Вести журнал діагностики"
 
-#: parakeet_dictation/ui/settings/pages.py:262
+#: parakeet_dictation/ui/settings/pages.py:261
 msgid "Open folder"
 msgstr "Відкрити теку"
 
-#: parakeet_dictation/ui/settings/pages.py:265
+#: parakeet_dictation/ui/settings/pages.py:264
 msgid "Timings and character counts only. Text and audio are never recorded."
 msgstr ""
 "Лише тривалості та кількість символів. Текст і звук ніколи не записуються."
 
-#: parakeet_dictation/ui/settings/pages.py:278
+#: parakeet_dictation/ui/settings/pages.py:277
 msgid ""
 "Offline dictation for KDE Plasma: hold a key, speak, release.\n"
 "Recognition runs on this computer; nothing is sent over the network."
@@ -459,11 +455,11 @@ msgstr ""
 "Офлайн-диктування для KDE Plasma: утримуйте клавішу, говоріть, відпустіть.\n"
 "Розпізнавання працює на цьому комп'ютері; нічого не надсилається в мережу."
 
-#: parakeet_dictation/ui/settings/pages.py:283
+#: parakeet_dictation/ui/settings/pages.py:282
 msgid "MIT licence · © Daniel Rosehill, Vadym Dziuba"
 msgstr "Ліцензія MIT · © Daniel Rosehill, Vadym Dziuba"
 
-#: parakeet_dictation/ui/settings/pages.py:284
+#: parakeet_dictation/ui/settings/pages.py:283
 msgid ""
 "Parakeet TDT model — NVIDIA, CC-BY-4.0 · TEN VAD — Agora, Apache-2.0 with "
 "additional conditions"
@@ -471,19 +467,19 @@ msgstr ""
 "Модель Parakeet TDT — NVIDIA, CC-BY-4.0 · TEN VAD — Agora, Apache-2.0 з "
 "додатковими умовами"
 
-#: parakeet_dictation/ui/settings/pages.py:297
+#: parakeet_dictation/ui/settings/pages.py:299
 msgid "General"
 msgstr "Загальні"
 
-#: parakeet_dictation/ui/settings/pages.py:298
+#: parakeet_dictation/ui/settings/pages.py:300
 msgid "Recognition"
 msgstr "Розпізнавання"
 
-#: parakeet_dictation/ui/settings/pages.py:299
+#: parakeet_dictation/ui/settings/pages.py:301
 msgid "Text Output"
 msgstr "Вставлення"
 
-#: parakeet_dictation/ui/settings/pages.py:300
+#: parakeet_dictation/ui/settings/pages.py:302
 msgid "Advanced"
 msgstr "Додатково"
 
@@ -521,7 +517,7 @@ msgstr "_OK"
 msgid "_Cancel"
 msgstr "_Скасувати"
 
-#: parakeet_dictation/ui/settings/window.py:176
+#: parakeet_dictation/ui/settings/window.py:180
 #, python-brace-format
 msgid ""
 "{key} is already used for Hold to talk — choose another Start / stop "
@@ -530,7 +526,7 @@ msgstr ""
 "{key} уже використовується для «Утримувати, щоб говорити» — виберіть іншу "
 "комбінацію клавіш для «Почати / зупинити»."
 
-#: parakeet_dictation/ui/settings/window.py:195
+#: parakeet_dictation/ui/settings/window.py:199
 #, python-brace-format
 msgid "Could not change Start at login: {error}"
 msgstr "Не вдалося змінити запуск під час входу в систему: {error}"

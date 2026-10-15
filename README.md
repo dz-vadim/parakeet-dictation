@@ -228,8 +228,8 @@ an info bar at the top instead of being lost.
 
 Interface language: the interface is available in Ukrainian and English. `ui_language` is `system`
 (default: follows `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` or `LANG`; English when none of them names a
-language with a catalogue), `uk` or `en`. Change it in Settings > General > Interface language; it
-takes effect after the app restarts. Diagnostics stay in English. Translators: `tools/update-translations.sh`
+language with a catalogue), `uk` or `en`. Change it in Settings > General > Interface language; the
+tray menu, the settings window and the shortcut names in System Settings switch at once. Diagnostics stay in English. Translators: `tools/update-translations.sh`
 extracts the strings, merges them into
 `parakeet_dictation/locale/uk/LC_MESSAGES/parakeet-dictation.po` and compiles the `.mo` (needs gettext);
 `python tools/render-settings.py OUTDIR [uk|en]` renders the settings pages to PNG for review.
@@ -277,7 +277,7 @@ Saving from the settings window rewrites the file atomically.
 | `filter_fillers` | bool | `true` | drop `um`, `uh`, `ehm`, `hmm`, `er`, `ah`, `erm`, `hm` |
 | `partial_overwrite` | bool | `true` | streaming profile only: type partials and retype on revision (ignored in `end_of_take`) |
 | **Interface** | | | |
-| `ui_language` | str | `"system"` | `system`, `uk` or `en`; applied at start |
+| `ui_language` | str | `"system"` | `system`, `uk` or `en`; applied at once |
 | **Overlay and preview** | | | |
 | `overlay` | bool | `true` | show the pill |
 | `overlay_position` | str | `"bottom"` | `bottom` or `top` centre |
