@@ -393,7 +393,8 @@ class ASREngine:
 
     def _run_offline(self, stop_event):
         vad = self._build_vad()
-        coalescer = _BlockCoalescer(self._config.coalesce_target_s)
+        # Clamped as enforce() clamps it, for a config built without it.
+        coalescer = _BlockCoalescer(min(max(float(self._config.coalesce_target_s), 0.0), 30.0))
         # Held around every mutation of the VAD and the coalescer, so the
         # preview thread can snapshot the still-open audio without racing the
         # capture thread that is extending it.
@@ -686,7 +687,7 @@ class ASREngine:
         of that — see `preview_interval_s`.
         """
         interval = max(float(self._config.preview_interval_s), 0.2)
-        window = int(max(float(self._config.preview_window_s), 1.0) * SAMPLE_RATE)
+        window = int(min(max(float(self._config.preview_window_s), 1.0), 30.0) * SAMPLE_RATE)
         try:
             # Blocks behind the model load on a cold first take; the take may
             # be over by the time it returns, hence the check straight after.

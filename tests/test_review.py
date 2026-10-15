@@ -1890,6 +1890,56 @@ def review27_int16_clip_and_beep_errors():
     finally:
         da_audio.sd.play, da_audio._active_config = saved
 
+
+# ---------------------------------------------------------------------------
+# #28 (F3, E8)  enforce() validates every enum and numeric range: a typo in
+#     config.json resets that key (logged), instead of a KeyError deep in
+#     the paste path or a zero-thread recognizer.  coalesce_target_s and
+#     preview_window_s are clamped (the engine clamps them too).
+# ---------------------------------------------------------------------------
+
+def review28_enforce_validates_enums_and_ranges():
+    print("\n[#28 F3 E8] enforce() resets bad enums and out-of-range numbers")
+    d = da_config.AppConfig()
+    bad = dict(hotkey_mode="push", overlay_position="left", insert_mode="each",
+               paste_transport="x11", typer="xdotool", tray_icon_style="cat",
+               paste_chord="ctrl+insert", terminal_paste_chord="",
+               num_threads=0, night_start=24, night_end=-1, vad_threshold=1.5,
+               beep_volume=-0.1, paste_min_delay_ms=-5, preview_interval_s=-1.0,
+               normalize_target_dbfs=12.0, vad_min_silence=float("nan"))
+    seen = []
+    cfg = da_config.AppConfig(**bad)
+    with redirect_stderr(io.StringIO()):
+        forced = cfg.enforce(lambda ev, **kw: seen.append(kw.get("key")))
+    for key in bad:
+        check(f"{key}={bad[key]!r} is reset to {getattr(d, key)!r}",
+              getattr(cfg, key) == getattr(d, key) and key in forced,
+              f"{getattr(cfg, key)!r}")
+    check("every reset is reported with its key", set(bad) <= set(seen),
+          str(sorted(set(bad) - set(seen))))
+
+    cfg = da_config.AppConfig(coalesce_target_s=120.0, preview_window_s=0.2)
+    with redirect_stderr(io.StringIO()):
+        cfg.enforce()
+    check("coalesce_target_s is clamped to 30 s", cfg.coalesce_target_s == 30.0,
+          str(cfg.coalesce_target_s))
+    check("preview_window_s is clamped to at least 1 s", cfg.preview_window_s == 1.0,
+          str(cfg.preview_window_s))
+    cfg = da_config.AppConfig(coalesce_target_s=-3.0, preview_window_s=99.0)
+    with redirect_stderr(io.StringIO()):
+        cfg.enforce()
+    check("a negative coalesce target is 0 (off), a huge window 30 s",
+          cfg.coalesce_target_s == 0.0 and cfg.preview_window_s == 30.0,
+          f"{cfg.coalesce_target_s} {cfg.preview_window_s}")
+
+    good = da_config.AppConfig(hotkey_mode="toggle", insert_mode="per_segment",
+                               overlay_position="top", paste_transport="ydotool",
+                               typer="wtype", num_threads=1, night_start=0, night_end=23,
+                               preview_interval_s=0.0)
+    with redirect_stderr(io.StringIO()):
+        forced = good.enforce()
+    check("valid values, edges included, are left alone", forced == [], str(forced))
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1918,7 +1968,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             24: review24_late_text_is_not_pasted_into_the_next_take,
             25: review25_mic_error_keeps_captured_speech,
             26: review26_audio_device_by_name,
-            27: review27_int16_clip_and_beep_errors}
+            27: review27_int16_clip_and_beep_errors,
+            28: review28_enforce_validates_enums_and_ranges}
 
 
 def main(argv):

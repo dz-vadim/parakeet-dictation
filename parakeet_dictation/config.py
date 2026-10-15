@@ -209,12 +209,39 @@ class AppConfig:
         """
         report = _reporter(log)
         forced = []
+        defaults = AppConfig.__dataclass_fields__
+        # Enums and ranges first: a typo in config.json resets that one key
+        # to its default (a stray chord name used to surface as a KeyError
+        # in the paste path, num_threads=0 as a recognizer that never built).
+        for key, allowed in _ENUMS.items():
+            if getattr(self, key) not in allowed:
+                setattr(self, key, defaults[key].default)
+                forced.append(key)
+                report("config_forced", key=key, value=defaults[key].default,
+                       reason="unknown_value")
+        for key, (lo, hi) in _RANGES.items():
+            value = getattr(self, key)
+            if not isinstance(value, (int, float)) or isinstance(value, bool) \
+                    or not lo <= value <= hi:          # NaN fails this too
+                default = defaults[key].default
+                setattr(self, key, default)
+                forced.append(key)
+                report("config_forced", key=key, value=default,
+                       reason="out_of_range", lo=lo, hi=hi)
+        for key, (lo, hi) in _CLAMPS.items():
+            value = getattr(self, key)
+            if isinstance(value, (int, float)) and value != value:   # NaN
+                value = defaults[key].default
+            clamped = float(min(max(value, lo), hi))
+            if clamped != value:
+                setattr(self, key, clamped)
+                forced.append(key)
+                report("config_forced", key=key, value=clamped, reason="clamped")
         if self.hotkey_mode == "hold" and self.insert_mode != "end_of_take":
             self.insert_mode = "end_of_take"
             forced.append("insert_mode")
             report("config_forced", key="insert_mode", value="end_of_take",
                    reason="hold_mode")
-        defaults = AppConfig.__dataclass_fields__
         for key in ("hotkey_toggle", "hotkey_start", "hotkey_stop", "hotkey_pause"):
             value = getattr(self, key)
             if key == "hotkey_pause" and value == "":
@@ -224,11 +251,6 @@ class AppConfig:
                 forced.append(key)
                 report("config_forced", key=key, value=defaults[key].default,
                        reason="unparseable_binding")
-        if self.tray_icon_style not in ("mic", "parrot", "wave"):
-            self.tray_icon_style = "mic"
-            forced.append("tray_icon_style")
-            report("config_forced", key="tray_icon_style", value="mic",
-                   reason="unknown_style")
         return forced
 
     @staticmethod
@@ -307,6 +329,36 @@ def _coerce(field_type, value):
     if field_type is dict:
         return isinstance(value, dict), value
     return True, value
+
+
+# What enforce() accepts.  Anything else is reset to the field's default.
+_CHORDS = ("ctrl+v", "ctrl+shift+v", "shift+insert")
+_ENUMS = {
+    "hotkey_mode": ("hold", "toggle", "start_stop"),
+    "insert_mode": ("end_of_take", "per_segment"),
+    "overlay_position": ("bottom", "top"),
+    "paste_transport": ("auto", "portal", "ydotool"),
+    "typer": ("clipboard", "wtype", "ydotool"),
+    "tray_icon_style": ("mic", "parrot", "wave"),
+    "paste_chord": _CHORDS,
+    "terminal_paste_chord": _CHORDS,
+}
+_RANGES = {
+    "num_threads": (1, 256),
+    "night_start": (0, 23),
+    "night_end": (0, 23),
+    "vad_threshold": (0.0, 1.0),
+    "vad_min_silence": (0.1, 5.0),
+    "beep_volume": (0.0, 1.0),
+    "normalize_target_dbfs": (-60.0, 0.0),
+    "paste_min_delay_ms": (0, 5000),
+    "preview_interval_s": (0.0, 60.0),     # 0 disables the preview pass
+}
+# Clamped rather than reset: the nearest valid value is what was meant.
+_CLAMPS = {
+    "coalesce_target_s": (0.0, 30.0),      # 0 disables coalescing
+    "preview_window_s": (1.0, 30.0),
+}
 
 
 def _pynput_binding_ok(binding) -> bool:

@@ -33,10 +33,6 @@ def main():
     config = AppConfig.load(log=DIAG.log)
     audio._active_config = config
 
-    # Ensure typer is a valid Wayland method
-    if config.typer not in ("clipboard", "wtype", "ydotool"):
-        config.typer = "clipboard"
-
     DIAG.set_enabled(config.diagnostics)
 
     # One instance per session: a second copy would register the same
