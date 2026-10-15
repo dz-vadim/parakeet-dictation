@@ -1,10 +1,11 @@
 """First-run welcome dialog."""
 
+import copy
 import sys
 
 from gi.repository import GLib, Gtk
 
-from ..config import APP_NAME, AppConfig
+from ..config import APP_NAME
 from ..i18n import _
 from ..models import _download_all_models
 
@@ -12,11 +13,13 @@ from ..models import _download_all_models
 class WelcomeDialog(Gtk.Dialog):
     """First-run dialog — downloads all models automatically."""
 
-    def __init__(self, profiles_data: dict, config: AppConfig, on_model_ready):
+    def __init__(self, profiles_data: dict, get_config, on_model_ready):
+        """`get_config` returns the live config: the download takes minutes,
+        and settings changed meanwhile must not be reverted at the end."""
         super().__init__(title=_("Welcome to {app}").format(app=APP_NAME), flags=0)
         self._profiles_data = profiles_data
         self._profiles = profiles_data["profiles"]
-        self._config = config
+        self._get_config = get_config
         self._on_model_ready = on_model_ready
         self.set_default_size(440, 280)
         self.set_deletable(False)
@@ -107,10 +110,11 @@ class WelcomeDialog(Gtk.Dialog):
 
         def on_done(success, err):
             if success:
-                self._config.model_profile = "desktop"
+                config = copy.deepcopy(self._get_config())
+                config.model_profile = "desktop"
                 self.destroy()
                 if self._on_model_ready:
-                    self._on_model_ready(self._config)
+                    self._on_model_ready(config)
             else:
                 btn.set_sensitive(True)
                 self._progress_bar.hide()

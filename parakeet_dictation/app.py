@@ -126,7 +126,7 @@ def main():
     # First-run: show welcome dialog if no models are downloaded
     profiles_data = controller.profiles_data
     if not _any_model_downloaded(profiles_data["profiles"]):
-        WelcomeDialog(profiles_data, config, tray.apply_settings)
+        WelcomeDialog(profiles_data, lambda: controller.config, tray.apply_settings)
 
     profile_name = controller.profiles.get(
         config.model_profile, {}

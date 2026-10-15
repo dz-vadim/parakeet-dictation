@@ -706,11 +706,41 @@ def s13_controller_apply_config():
         tmp.cleanup()
 
 
+def s14_welcome_dialog():
+    print("\n[14] welcome dialog applies the live config, not the startup one (GTK)")
+    import gi
+    gi.require_version("Gtk", "3.0")
+    from parakeet_dictation import config as cfgmod, i18n
+    from parakeet_dictation.models import load_model_profiles
+    from parakeet_dictation.ui import windows
+    i18n.setup("en")
+    live = {"cfg": cfgmod.AppConfig(model_profile="laptop")}
+    applied = []
+    saved = (windows._download_all_models, windows.WelcomeDialog.show_all)
+    windows._download_all_models = lambda _data, _progress, done: done(True, None)
+    windows.WelcomeDialog.show_all = lambda self: None     # never map a window in tests
+    try:
+        dlg = windows.WelcomeDialog(load_model_profiles(), lambda: live["cfg"], applied.append)
+        # Changed while the download runs (tray menu, settings window, KDE).
+        live["cfg"] = cfgmod.AppConfig(model_profile="laptop", num_threads=7, overlay_position="top")
+        dlg._dl_btn.clicked()
+        got = applied[-1] if applied else None
+        check("I3: the download result is applied once", len(applied) == 1, str(len(applied)))
+        check("I3: model set to the downloaded default", got is not None and got.model_profile == "desktop")
+        check("I3: settings changed during the download survive",
+              got is not None and got.num_threads == 7 and got.overlay_position == "top")
+        check("I3: the live config object is not mutated", live["cfg"].model_profile == "laptop"
+              and got is not live["cfg"])
+    finally:
+        windows._download_all_models, windows.WelcomeDialog.show_all = saved
+
+
 SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions,
             5: s5_controller_take_kind, 6: s6_menu_model,
             7: s7_settings_draft, 8: s8_autostart, 9: s9_widgets,
             10: s10_settings_window, 11: s11_tray,
-            12: s12_catalogue_complete, 13: s13_controller_apply_config}
+            12: s12_catalogue_complete, 13: s13_controller_apply_config,
+            14: s14_welcome_dialog}
 
 
 def main(argv):
