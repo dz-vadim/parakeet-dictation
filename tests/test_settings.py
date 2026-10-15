@@ -332,8 +332,62 @@ def s6_menu_model():
     i18n.setup("en")
 
 
+def s7_settings_draft():
+    print("\n[7] settings draft: dirty, page defaults, diff-merge commit")
+    from parakeet_dictation import config as cfgmod
+    from parakeet_dictation.ui.settings.model import SettingsDraft, PAGE_KEYS
+    applied = cfgmod.AppConfig(num_threads=2, overlay_position="top")
+    d = SettingsDraft(applied)
+    check("fresh draft is clean", not d.dirty)
+    d.set("overlay_position", "bottom")
+    check("edit makes it dirty", d.dirty)
+    d.set("overlay_position", "top")
+    check("edit back is clean again", not d.dirty)
+    d.set("num_threads", 6)
+    d.set("overlay_position", "bottom")
+    d.reset_page("advanced")
+    check("Defaults resets only the page", d.get("num_threads") == cfgmod.AppConfig().num_threads
+          and d.get("overlay_position") == "bottom")
+    current = cfgmod.AppConfig(num_threads=2, overlay_position="top", model_profile="laptop")
+    out = d.commit(current)
+    check("commit keeps a change made elsewhere (tray model switch)",
+          out.model_profile == "laptop", out.model_profile)
+    check("commit applies the window's edits", out.overlay_position == "bottom"
+          and out.num_threads == cfgmod.AppConfig().num_threads)
+    check("commit returns a copy", out is not current)
+    check("clean after commit", not d.dirty)
+    every = {k for keys in PAGE_KEYS.values() for k in keys}
+    check("every page key is a config field", every <= set(cfgmod.AppConfig.__dataclass_fields__), str(every - set(cfgmod.AppConfig.__dataclass_fields__)))
+
+
+def s8_autostart():
+    print("\n[8] autostart file")
+    import os, tempfile
+    from parakeet_dictation import autostart
+    saved = os.environ.get("XDG_CONFIG_HOME")
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["XDG_CONFIG_HOME"] = tmp
+        try:
+            check("off by default", not autostart.is_enabled())
+            autostart.set_enabled(True)
+            text = autostart.desktop_path().read_text()
+            check("written under XDG_CONFIG_HOME", str(autostart.desktop_path()).startswith(tmp))
+            check("Exec line present", f"Exec={autostart.exec_line()}" in text, text)
+            check("now enabled", autostart.is_enabled())
+            autostart.desktop_path().write_text(text + "Hidden=true\n")
+            check("Hidden=true counts as off", not autostart.is_enabled())
+            autostart.set_enabled(False)
+            check("removed", not autostart.desktop_path().exists())
+        finally:
+            if saved is None:
+                os.environ.pop("XDG_CONFIG_HOME", None)
+            else:
+                os.environ["XDG_CONFIG_HOME"] = saved
+
+
 SECTIONS = {1: s1_shortcuts, 2: s2_i18n, 3: s3_config_migration, 4: s4_hotkeys_two_actions,
-            5: s5_controller_take_kind, 6: s6_menu_model}
+            5: s5_controller_take_kind, 6: s6_menu_model,
+            7: s7_settings_draft, 8: s8_autostart}
 
 
 def main(argv):
