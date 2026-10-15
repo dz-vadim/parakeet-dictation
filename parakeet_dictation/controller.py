@@ -691,9 +691,25 @@ class DictationController:
         print(f"ERROR: {msg}", file=sys.stderr)
         if self._status_callback:
             self._status_callback(f"Error: {msg[:60]}")
+        rescued = False
+        if self._take_chunks and self._gesture != GESTURE_IDLE:
+            # The engine decodes what was captured before a microphone
+            # error; in end-of-take mode that text is held here.  It is not
+            # pasted — the push-to-talk key may still be down, and a chord
+            # sent with its modifier held is not a paste — but it is not
+            # thrown away either: it goes on the clipboard.
+            chunks, self._take_chunks = self._take_chunks, []
+            text = _WS_RE.sub(" ", " ".join(chunks)).strip()
+            DIAG.log("take_rescued", segments=len(chunks), chars=len(text),
+                     take=self._take_seq)
+            self._typer.copy_only(text)
+            rescued = True
         if self._gesture != GESTURE_IDLE:
             # Two distinct terminal paths: the engine never came up at all, or
             # it failed once it was already capturing.
             outcome = "start_failed" if self._gesture == GESTURE_STARTING else "error"
             self._end_take(outcome, "engine_error")
-        self._overlay_state("error", overlay_error_message(msg))
+        message = overlay_error_message(msg)
+        if rescued:
+            message = f"{message} — text is on the clipboard"
+        self._overlay_state("error", message)

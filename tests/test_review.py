@@ -1694,6 +1694,119 @@ def review24_late_text_is_not_pasted_into_the_next_take():
           texts == ["first take", "second take"], str(texts))
     ctl.shutdown()
 
+
+# ---------------------------------------------------------------------------
+# #25 (E1)  A microphone error mid-take (USB mic unplugged, PipeWire
+#     restarted) still decodes what was captured before it, in both paths.
+# ---------------------------------------------------------------------------
+
+class FailingStream(CountedStream):
+    """N good reads, then the host error an unplugged device produces."""
+
+    def read(self, n):
+        self._left -= 1
+        if self._left < 0:
+            raise da_engine.sd.PortAudioError("Unanticipated host error")
+        return np.zeros((n, 1), dtype=np.float32), False
+
+
+class ScriptedVad:
+    """Closes one 1 s phrase on the third block and holds a second one open
+    until the end-of-take flush."""
+
+    def __init__(self):
+        self.ready, self.n, self.open = [], 0, True
+
+    def accept_waveform(self, _x):
+        self.n += 1
+        if self.n == 3:
+            self.ready.append(da_audio._SpeechSegment(np.ones(SR, np.float32), None))
+
+    def is_speech_detected(self):
+        return True
+
+    def empty(self):
+        return not self.ready
+
+    @property
+    def front(self):
+        return self.ready[0]
+
+    def pop(self):
+        self.ready.pop(0)
+
+    def flush(self):
+        if self.open:
+            self.open = False
+            self.ready.append(da_audio._SpeechSegment(np.ones(SR, np.float32), None))
+            return True
+        return False
+
+    def open_tail(self, _n):
+        return np.zeros(0, np.float32)
+
+
+def review25_mic_error_keeps_captured_speech():
+    print("\n[#25 E1] a mic error mid-take still decodes what was captured")
+    texts, errors = [], []
+    config = da_config.AppConfig(preview=False)
+    engine = da_engine.ASREngine(config, {"streaming": False, "files": {}},
+                                 on_text=texts.append, on_partial=lambda _t: None,
+                                 on_error=errors.append)
+    engine._acquire_offline_recognizer = lambda: (None, 0.0)
+    engine._decode_segment = lambda _r, smp, **_k: (f"words{len(smp)}", 1.0)
+    engine._build_vad = ScriptedVad
+    da_engine.sd.InputStream = lambda **_kw: FailingStream(5, threading.Event())
+    engine.start()
+    engine._thread.join(10)
+    check("the error is still reported", errors == ["Unanticipated host error"], str(errors))
+    check("and both phrases captured before it were decoded and delivered",
+          sum(int(t[5:]) for t in texts) == 2 * SR, str(texts))
+
+    words = ["one", "two", "three", "four", "five", "six"]
+    texts, commits = [], []
+    engine = da_engine.ASREngine(
+        da_config.AppConfig(partial_overwrite=False), {"streaming": True, "files": {}},
+        on_text=texts.append, on_partial=lambda _t: None, on_error=lambda _e: None,
+        on_partial_type=lambda _t: None, on_commit_partial=commits.append)
+    rec = FakeOnlineRecognizer(words)
+    engine._acquire_online_recognizer = lambda: (rec, 0.0)
+    da_engine.sd.InputStream = lambda **_kw: FailingStream(5, threading.Event())
+    raised = None
+    try:
+        engine._run_streaming(threading.Event())
+    except da_engine.sd.PortAudioError as e:
+        raised = e
+    check("streaming: the error still propagates to _run", raised is not None)
+    check("streaming: the tail before the error is committed",
+          texts == ["one two three four five six"], str(texts))
+
+    # The controller end: in end-of-take mode that text is held back, and
+    # the error used to discard it.  The key may still be down, so no chord
+    # can go out — the text is put on the clipboard and the pill says so.
+    copied = []
+
+    class CopyTyper(NotBeforeTyper):
+        def copy_only(self, text):
+            copied.append(text)
+
+    ctl, eng, ov = make_controller()
+    ctl._typer = CopyTyper()
+    ctl.hold_press()
+    capture_up(ctl, eng)
+    ctl._on_final_text("words before")
+    ctl._on_final_text("the unplug")
+    with redirect_stderr(io.StringIO()):
+        ctl._on_error("Unanticipated host error")
+    check("controller: the held-back text goes to the clipboard, nothing is pasted",
+          copied == ["words before the unplug"] and ctl._typer.calls == [],
+          f"copied={copied} pasted={ctl._typer.calls}")
+    check("controller: the pill tells the user where the text is",
+          ov.states and ov.states[-1][0] == "error" and "clipboard" in ov.states[-1][1].lower(),
+          str(ov.states[-1:]))
+    check("controller: the take still ends", ctl.gesture == "idle", ctl.gesture)
+    ctl.shutdown()
+
 # ---------------------------------------------------------------------------
 
 SECTIONS = {1: review1_vad_speech_floor,
@@ -1719,7 +1832,8 @@ SECTIONS = {1: review1_vad_speech_floor,
             21: review21_kglobalaccel_restart_reregisters,
             22: review22_shutdown_flushes_clipboard_restore,
             23: review23_privacy,
-            24: review24_late_text_is_not_pasted_into_the_next_take}
+            24: review24_late_text_is_not_pasted_into_the_next_take,
+            25: review25_mic_error_keeps_captured_speech}
 
 
 def main(argv):

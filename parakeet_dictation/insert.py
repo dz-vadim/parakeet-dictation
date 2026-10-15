@@ -902,6 +902,29 @@ class TextTyper:
 
         self._submit(job, on_done)
 
+    def copy_only(self, text: str):
+        """Queue `text` onto both selections and press nothing — for text
+        that cannot be pasted safely (the push-to-talk key may still be
+        down).  It stays there for the user: no restore follows, and any
+        restore still pending is cancelled so it cannot overwrite it."""
+        text = self._sanitize(text)
+        if not text:
+            return
+
+        def job():
+            with self._clip_lock:
+                self._clip_gen += 1
+                self._clip_restore_pending = False
+                self._clip_saved = None
+                for flag in ([], ["--primary"]):
+                    try:
+                        _run_quiet(["wl-copy", *flag], input=_to_bytes(text))
+                    except (OSError, subprocess.TimeoutExpired) as e:
+                        DIAG.log("copy_failed", primary=bool(flag), err=type(e).__name__)
+                        return
+
+        self._submit(job)
+
     def type_partial(self, text: str, target=None):
         """Queue a streaming partial, erasing the previous partial first."""
         text = self._sanitize(text)

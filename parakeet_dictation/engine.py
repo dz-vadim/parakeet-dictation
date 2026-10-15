@@ -514,12 +514,15 @@ class ASREngine:
                     was_speech = speech
 
                     drain("silence")
-
-                # Close whatever the VAD still holds.  A release mid-phrase
-                # leaves the entire phrase pending with no silence to cut it,
-                # so this is the only thing that saves the user's last words;
-                # the decoder is drained in the finally block below, so they
-                # still reach the document.
+        finally:
+            # Close whatever the VAD still holds.  A release mid-phrase
+            # leaves the entire phrase pending with no silence to cut it, so
+            # this is the only thing that saves the user's last words; the
+            # decoder is drained below, so they still reach the document.
+            # In the finally, and guarded on its own: a microphone that
+            # failed mid-take (unplugged, PipeWire restarted) used to take
+            # everything captured before the error down with it.
+            try:
                 with live_lock:
                     stats["flushed"] = int(bool(vad.flush()))
                     ready = []
@@ -527,12 +530,13 @@ class ASREngine:
                         ready.extend(coalescer.add(vad.front))
                         vad.pop()
                     # Whatever is still accumulating goes as-is: a block that
-                    # never reached the target is still the words the user just
-                    # said, and only MIN_SEGMENT_SAMPLES may drop it.
+                    # never reached the target is still the words the user
+                    # just said, and only MIN_SEGMENT_SAMPLES may drop it.
                     ready.extend(coalescer.flush())
                 for block, parts in ready:
                     submit(block, "flush", parts)
-        finally:
+            except Exception as e:
+                DIAG.log("flush_error", err=type(e).__name__)
             # The preview is a hypothesis about audio that has now been closed
             # and queued: drop it before the committed text arrives, so the
             # panel cannot end the take showing a guess next to the real thing.
@@ -769,77 +773,84 @@ class ASREngine:
                           # only speech signal, there is no VAD here
 
         device = resolve_audio_device(self._config.audio_device)
-        with sd.InputStream(
-            device=device, channels=1, dtype="float32", samplerate=SAMPLE_RATE,
-            blocksize=samples_per_chunk,
-        ) as mic:
-            DIAG.log("session_start", mode="streaming",
-                     profile=self._config.model_profile,
-                     threads=self._config.num_threads)
-            GLib.idle_add(self._on_capture_start)
-            play_beep_start(self._config.beep_volume)
-            GLib.idle_add(self._on_partial, "")
+        try:
+            with sd.InputStream(
+                device=device, channels=1, dtype="float32", samplerate=SAMPLE_RATE,
+                blocksize=samples_per_chunk,
+            ) as mic:
+                DIAG.log("session_start", mode="streaming",
+                         profile=self._config.model_profile,
+                         threads=self._config.num_threads)
+                GLib.idle_add(self._on_capture_start)
+                play_beep_start(self._config.beep_volume)
+                GLib.idle_add(self._on_partial, "")
 
-            last_overflow_log = 0.0
-            last_partial = ""
-            while not stop_event.is_set():
-                self._pause_event.wait(timeout=0.1)
-                if stop_event.is_set():
-                    break
-                if self._paused:
-                    continue
+                last_overflow_log = 0.0
+                last_partial = ""
+                while not stop_event.is_set():
+                    self._pause_event.wait(timeout=0.1)
+                    if stop_event.is_set():
+                        break
+                    if self._paused:
+                        continue
 
-                audio, overflowed = mic.read(samples_per_chunk)
-                if overflowed:
-                    # Samples were lost before this read — this block is good.
-                    overflow += 1
-                    now = time.monotonic()
-                    if now - last_overflow_log > 5.0:
-                        last_overflow_log = now
-                        DIAG.log("audio_overflow", count=overflow)
-                samples = audio.reshape(-1)
-                self._publish_level(audio, speaking)
-                stream.accept_waveform(SAMPLE_RATE, samples)
+                    audio, overflowed = mic.read(samples_per_chunk)
+                    if overflowed:
+                        # Samples were lost before this read — this block is good.
+                        overflow += 1
+                        now = time.monotonic()
+                        if now - last_overflow_log > 5.0:
+                            last_overflow_log = now
+                            DIAG.log("audio_overflow", count=overflow)
+                    samples = audio.reshape(-1)
+                    self._publish_level(audio, speaking)
+                    stream.accept_waveform(SAMPLE_RATE, samples)
 
+                    with INFERENCE_LOCK:
+                        while recognizer.is_ready(stream):
+                            recognizer.decode_stream(stream)
+                        partial = recognizer.get_result(stream).strip()
+                        at_endpoint = recognizer.is_endpoint(stream)
+
+                    speaking = bool(partial)
+                    if partial and partial != last_partial:
+                        # Only a changed hypothesis is worth a callback: unchanged,
+                        # it would re-erase and re-type the same words every 100 ms.
+                        GLib.idle_add(self._on_partial, partial)
+                        if partial_overwrite:
+                            GLib.idle_add(self._on_partial_type, partial)
+                    last_partial = partial
+
+                    if at_endpoint:
+                        if partial:
+                            if partial_overwrite:
+                                GLib.idle_add(self._on_commit_partial, partial)
+                            else:
+                                GLib.idle_add(self._on_text, partial)
+                        with INFERENCE_LOCK:
+                            recognizer.reset(stream)
+                        last_partial = ""
+        finally:
+            # End of session — and in the finally, so a microphone error
+            # mid-take still commits what was heard before it.  Everything
+            # after the last endpoint is still in the stream and used to be
+            # lost with it: a release mid-sentence is the common case, not
+            # the exception.  Tell the recognizer no more audio is coming
+            # (it then decodes the frames it was holding back), and commit
+            # the result through the same path an endpoint takes.
+            final = ""
+            try:
+                stream.input_finished()
                 with INFERENCE_LOCK:
                     while recognizer.is_ready(stream):
                         recognizer.decode_stream(stream)
-                    partial = recognizer.get_result(stream).strip()
-                    at_endpoint = recognizer.is_endpoint(stream)
-
-                speaking = bool(partial)
-                if partial and partial != last_partial:
-                    # Only a changed hypothesis is worth a callback: unchanged,
-                    # it would re-erase and re-type the same words every 100 ms.
-                    GLib.idle_add(self._on_partial, partial)
+                    final = recognizer.get_result(stream).strip()
+                if final:
                     if partial_overwrite:
-                        GLib.idle_add(self._on_partial_type, partial)
-                last_partial = partial
-
-                if at_endpoint:
-                    if partial:
-                        if partial_overwrite:
-                            GLib.idle_add(self._on_commit_partial, partial)
-                        else:
-                            GLib.idle_add(self._on_text, partial)
-                    with INFERENCE_LOCK:
-                        recognizer.reset(stream)
-                    last_partial = ""
-
-        # End of session.  Everything after the last endpoint is still in the
-        # stream and used to be lost with it: a release mid-sentence is the
-        # common case, not the exception.  Tell the recognizer no more audio
-        # is coming (it then decodes the frames it was holding back), and
-        # commit the result through the same path an endpoint takes.
-        stream.input_finished()
-        with INFERENCE_LOCK:
-            while recognizer.is_ready(stream):
-                recognizer.decode_stream(stream)
-            final = recognizer.get_result(stream).strip()
-        if final:
-            if partial_overwrite:
-                GLib.idle_add(self._on_commit_partial, final)
-            else:
-                GLib.idle_add(self._on_text, final)
-        DIAG.log("session_stop", mode="streaming", overflow=overflow,
-                 flushed=bool(final))
+                        GLib.idle_add(self._on_commit_partial, final)
+                    else:
+                        GLib.idle_add(self._on_text, final)
+            except Exception as e:
+                DIAG.log("flush_error", err=type(e).__name__, mode="streaming")
+            DIAG.log("session_stop", mode="streaming", overflow=overflow,
+                     flushed=bool(final))
