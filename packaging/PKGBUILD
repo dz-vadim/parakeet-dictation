@@ -20,7 +20,7 @@
 
 pkgname=parakeet-dictation-git
 _pkgname=parakeet-dictation
-pkgver=2.0.0.r22.g0ce7ddd
+pkgver=2.0.0.r91.gd2ba053
 pkgrel=1
 pkgdesc="On-device push-to-talk voice dictation for KDE Plasma Wayland (Parakeet TDT via sherpa-onnx, TEN VAD)"
 arch=('any')
@@ -60,16 +60,13 @@ sha256sums=('SKIP')
 
 pkgver() {
   cd "$_pkgname"
-  if git describe --long --tags --abbrev=7 >/dev/null 2>&1; then
-    # vX.Y.Z-N-gHASH -> X.Y.Z.rN.gHASH
-    git describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
-  else
-    # No tags yet: version from the package, then commit count and hash.
-    printf '%s.r%s.g%s' \
-      "$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' parakeet_dictation/__init__.py)" \
-      "$(git rev-list --count HEAD)" \
-      "$(git rev-parse --short=7 HEAD)"
-  fi
+  # The version from the package, then commit count and hash.  Not
+  # `git describe`: this fork carries upstream's v1.x tags, which would put
+  # the AUR version below the 2.0.0 the code calls itself.
+  printf '%s.r%s.g%s' \
+    "$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' parakeet_dictation/__init__.py)" \
+    "$(git rev-list --count HEAD)" \
+    "$(git rev-parse --short=7 HEAD)"
 }
 
 build() {
