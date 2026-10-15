@@ -396,11 +396,12 @@ Tests (each prints one `[PASS]`/`[FAIL]` line per check and exits non-zero on fa
 | Suite | Checks | Needs |
 |---|---|---|
 | `.venv/bin/python tests/ptt_state.py` | 43 | nothing (stub engine); covers the push-to-talk state machine |
-| `.venv/bin/python tests/test_defects.py` | 124 | nothing (no model); the package-split defect list, one section per defect |
-| `.venv/bin/python tests/test_review.py` | 248 | a display for one section; the 2026-09-30 and 2026-10-15 reviews, one section per finding |
+| `.venv/bin/python tests/test_defects.py` | 115 | nothing (no model); the package-split defect list, one section per defect |
+| `.venv/bin/python tests/test_review.py` | 241 | a display for one section; the 2026-09-30 and 2026-10-15 reviews, one section per finding |
 | `.venv/bin/python tests/overlay_safety.py` | 22 | a display; pill refusal gate, watchdog, stale meter, preview panel |
+| `.venv/bin/python tests/test_settings.py` | 197 | a display for the GTK sections, `xgettext` for the catalogue check; the tray/settings redesign: shortcuts, config migration, menu model, settings window, autostart, Ukrainian catalogue |
 | `.venv/bin/python tests/test_pipeline.py` | 23 | the desktop model, `bench/segs/*.wav` (4 or more), `bench/real_uk_norm.wav` |
-| `.venv/bin/python tests/test_hold_take.py` | 210 | the desktop model, `bench/staging/s90.wav`, `bench/segs/00.wav`, `bench/segs/01.wav`; real-time fake microphone, takes a few minutes |
+| `.venv/bin/python tests/test_hold_take.py` | 208 | the desktop model, `bench/staging/s90.wav`, `bench/segs/00.wav`, `bench/segs/01.wav`; real-time fake microphone, takes a few minutes |
 
 The two model suites drive the real engine, VAD, coalescer, controller and `TextTyper`; only the
 microphone and the external binaries (`wl-copy`, `wl-paste`, `ydotool`) are replaced. The fixture
