@@ -353,8 +353,11 @@ def review2_take_ends_even_if_the_typer_raises():
 
 
 # ---------------------------------------------------------------------------
-# #3  apply_config() must preload when the recognizer key changes, even though
-#     the Settings dialog hands back the very same (mutated) config object.
+# #3  apply_config() must preload when the recognizer key changes.  The
+#     settings window and the tray now hand over a modified deep copy, but the
+#     check compares against the key the engine was built with, never the old
+#     config object, so it must also hold for a caller that mutates and passes
+#     back the controller's own object — the case exercised here.
 # ---------------------------------------------------------------------------
 
 def review3_apply_config_preloads_on_model_switch():
@@ -362,7 +365,7 @@ def review3_apply_config_preloads_on_model_switch():
     ctl, _eng, _ov = make_controller(stub=False)
     preloads = []
     ctl.preload = lambda: preloads.append(ctl._engine)
-    cfg = ctl.config                       # what SettingsDialog does: same object
+    cfg = ctl.config                       # the strictest case: the same object, mutated
     cfg.model_profile = "laptop"
     with redirect_stderr(io.StringIO()):
         ctl.apply_config(cfg)

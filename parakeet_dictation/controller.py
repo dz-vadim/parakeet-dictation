@@ -602,9 +602,9 @@ class DictationController:
             if self._gesture != GESTURE_IDLE:
                 self._end_take("cancel", "config_change")
             self._overlay_state("hidden")
-        # The engine remembers what it was built for; the config object
-        # cannot be asked, because the Settings dialog mutates the one this
-        # controller already holds and hands that same object back.
+        # The engine remembers what it was built for.  Callers hand over a
+        # modified copy, but comparing against the engine's key rather than
+        # the old config object also covers one that mutates ours in place.
         old_key = self._engine.recognizer_key
         new_config.enforce(DIAG.log)      # before save(): the file never holds it
         self._config = new_config
