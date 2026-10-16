@@ -972,6 +972,108 @@ def defect12_vad_text_truthful():
 
 
 # ---------------------------------------------------------------------------
+# #13 portal_session: during_take — the "Remote Control" session (and its
+#     Plasma tray icon) is open only while a take records and pastes.
+# ---------------------------------------------------------------------------
+
+class _FakePortal:
+    def __init__(self):
+        self.calls = []
+
+    def start_async(self, interactive=True):
+        self.calls.append(("start", interactive))
+
+    def release(self):
+        self.calls.append(("release",))
+
+
+def defect13_portal_during_take():
+    print("\n[#13] portal_session: during_take opens the session per take")
+    from gi.repository import GLib
+    from parakeet_dictation import controller as da_controller
+    from parakeet_dictation import insert as da_insert
+    da_controller.DIAG = TEST_DIAG
+    da_insert.DIAG = TEST_DIAG
+
+    # PortalKeyboard: a release while the start is in flight closes the
+    # session the start opens; a non-interactive start needs a saved grant.
+    pk = da_insert.PortalKeyboard()
+    gate = threading.Event()
+
+    def fake_start(_ctx):
+        gate.wait(5)
+        pk._session, pk._state = "/s/1", "ready"
+    pk._start = fake_start
+    saved_load = da_insert.PortalKeyboard.load_token
+    try:
+        da_insert.PortalKeyboard.load_token = classmethod(lambda cls: "")
+        pk.start_async(interactive=False)
+        check("no grant: a take does not start the session (no prompt mid-take)",
+              pk._thread is None and pk.state == "idle", pk.state)
+        da_insert.PortalKeyboard.load_token = classmethod(lambda cls: "tok")
+        pk.start_async(interactive=False)
+        pk.release()
+        check("release during the start leaves it running", pk.state == "starting")
+        gate.set()
+        pk.wait(5)
+        check("the start then closes what it opened",
+              pk._session is None and pk.state == "idle", pk.state)
+        pk.start_async(interactive=False)
+        pk.wait(5)
+        check("a later take reopens it", pk.ready)
+        pk.release()
+        check("release when ready closes it", not pk.ready and pk.state == "idle")
+    finally:
+        da_insert.PortalKeyboard.load_token = saved_load
+
+    # Controller: start -> silent restore, take end -> release once pastes are out.
+    fake = _FakePortal()
+    saved_pk, saved_tok = da_insert.portal_keyboard, da_insert.PortalKeyboard.load_token
+    with tempfile.TemporaryDirectory(prefix="parakeet-cfg-") as tmp:
+        saved = (da_config.CONFIG_DIR, da_config.CONFIG_FILE)
+        da_config.CONFIG_DIR = Path(tmp)
+        da_config.CONFIG_FILE = Path(tmp) / "config.json"
+        da_insert.portal_keyboard = lambda: fake
+        try:
+            da_insert.PortalKeyboard.load_token = classmethod(lambda cls: "tok")
+            ctl = da_controller.DictationController(
+                da_config.AppConfig(portal_session="during_take"))
+            ctl.init_portal()
+            check("with a grant, app start opens nothing", fake.calls == [], fake.calls)
+            da_insert.PortalKeyboard.load_token = classmethod(lambda cls: "")
+            ctl.init_portal()
+            check("without one, app start asks once and lets it go",
+                  fake.calls == [("start", True), ("release",)], fake.calls)
+            fake.calls.clear()
+
+            ctl._engine.start = lambda: None
+            ctl.start(kind="toggle")          # Meta+Insert and Insert both land here
+            check("a take start restores the grant silently",
+                  fake.calls == [("start", False)], fake.calls)
+            ctl._end_take("success", "test")
+            ctl._typer.wait_idle(3.0)
+            ctx = GLib.MainContext.default()
+            deadline = time.monotonic() + 2
+            while ("release",) not in fake.calls and time.monotonic() < deadline:
+                ctx.iteration(False)
+            check("the take's end releases it after the pastes",
+                  fake.calls[-1:] == [("release",)], fake.calls)
+
+            fake.calls.clear()
+            ctl.apply_config(da_config.AppConfig(portal_session="always"))
+            check("switching to always opens it now",
+                  fake.calls == [("start", True)], fake.calls)
+            fake.calls.clear()
+            ctl.apply_config(da_config.AppConfig(paste_transport="ydotool"))
+            check("ydotool releases it", fake.calls == [("release",)], fake.calls)
+            ctl.shutdown()
+        finally:
+            da_insert.portal_keyboard = saved_pk
+            da_insert.PortalKeyboard.load_token = saved_tok
+            da_config.CONFIG_DIR, da_config.CONFIG_FILE = saved
+
+
+# ---------------------------------------------------------------------------
 
 SECTIONS = [defect2_config_load, defect3_engine_stop,
             defect4_single_instance, defect5_missing_helper_named,
@@ -979,7 +1081,7 @@ SECTIONS = [defect2_config_load, defect3_engine_stop,
             defect8_model_hint, defect9_thread_default,
             defect10_focus_log_on_change,
             defect11_hold_mode_defaults_and_guard,
-            defect12_vad_text_truthful]
+            defect12_vad_text_truthful, defect13_portal_during_take]
 
 
 def main():

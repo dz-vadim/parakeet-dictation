@@ -266,6 +266,7 @@ Saving from the settings window rewrites the file atomically.
 | `insert_mode` | str | `"end_of_take"` | applies to start/stop takes: `end_of_take` pastes once at the stop, `per_segment` pastes each phrase as it decodes. Hold-to-talk takes always paste once at the release |
 | `typer` | str | `"clipboard"` | `clipboard` (stage + chord), `ydotool` (same, chord forced through ydotool), `wtype` (types the text directly; needs the virtual-keyboard protocol, labelled GNOME/Sway only in Settings) |
 | `paste_transport` | str | `"auto"` | how the chord is pressed: `portal`, `ydotool`, or `auto` (portal when its session is ready, else ydotool) |
+| `portal_session` | str | `"always"` | when the portal session is open (Plasma shows a "Remote Control" tray icon while it is): `always` (app start to quit) or `during_take` (each take restores the saved grant silently and releases it after its paste; the first-time prompt still comes at app start) |
 | `paste_chord` | str | `"ctrl+v"` | chord for unknown and unlisted windows; `ctrl+v`, `ctrl+shift+v` or `shift+insert` |
 | `terminal_paste_chord` | str | `"ctrl+shift+v"` | chord for `terminal_window_classes` |
 | `terminal_window_classes` | list | kitty, Alacritty, konsole, yakuake, foot, wezterm, ghostty, xterm, st, contour, gnome-terminal-server, terminator, Tilix, ... | KWin `resourceClass` values, matched case-insensitively |
@@ -396,10 +397,10 @@ Tests (each prints one `[PASS]`/`[FAIL]` line per check and exits non-zero on fa
 | Suite | Checks | Needs |
 |---|---|---|
 | `.venv/bin/python tests/ptt_state.py` | 43 | nothing (stub engine); covers the push-to-talk state machine |
-| `.venv/bin/python tests/test_defects.py` | 115 | nothing (no model); the package-split defect list, one section per defect |
+| `.venv/bin/python tests/test_defects.py` | 126 | nothing (no model); the package-split defect list, one section per defect |
 | `.venv/bin/python tests/test_review.py` | 241 | a display for one section; the 2026-09-30 and 2026-10-15 reviews, one section per finding |
 | `.venv/bin/python tests/overlay_safety.py` | 22 | a display; pill refusal gate, watchdog, stale meter, preview panel |
-| `.venv/bin/python tests/test_settings.py` | 197 | a display for the GTK sections, `xgettext` for the catalogue check; the tray/settings redesign: shortcuts, config migration, menu model, settings window, autostart, Ukrainian catalogue |
+| `.venv/bin/python tests/test_settings.py` | 205 | a display for the GTK sections, `xgettext` for the catalogue check; the tray/settings redesign: shortcuts, config migration, menu model, settings window, autostart, Ukrainian catalogue |
 | `.venv/bin/python tests/test_pipeline.py` | 23 | the desktop model, `bench/segs/*.wav` (4 or more), `bench/real_uk_norm.wav` |
 | `.venv/bin/python tests/test_hold_take.py` | 208 | the desktop model, `bench/staging/s90.wav`, `bench/segs/00.wav`, `bench/segs/01.wav`; real-time fake microphone, takes a few minutes |
 

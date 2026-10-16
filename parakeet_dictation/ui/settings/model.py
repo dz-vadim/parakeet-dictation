@@ -11,7 +11,7 @@ PAGE_KEYS = {
     "output": ("insert_mode", "keep_on_clipboard", "overlay", "overlay_position",
                "tray_icon_style"),
     "advanced": ("num_threads", "vad_min_silence", "paste_min_delay_ms",
-                 "paste_transport", "terminal_window_classes", "diagnostics"),
+                 "paste_transport", "portal_session", "terminal_window_classes", "diagnostics"),
     "about": (),
 }
 _ALL_KEYS = tuple(k for keys in PAGE_KEYS.values() for k in keys)

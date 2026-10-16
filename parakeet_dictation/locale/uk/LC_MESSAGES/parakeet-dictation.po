@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: parakeet-dictation\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-16 02:46+0300\n"
+"POT-Creation-Date: 2026-10-17 01:13+0300\n"
 "PO-Revision-Date: 2026-10-16 00:00+0000\n"
 "Last-Translator: Parakeet Dictation\n"
 "Language-Team: Ukrainian\n"
@@ -13,27 +13,27 @@ msgstr ""
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
 "n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
-#: parakeet_dictation/controller.py:43
+#: parakeet_dictation/controller.py:44
 msgid "Model files missing — open Settings › Recognition"
 msgstr "Немає файлів моделі — відкрийте Налаштування › Розпізнавання"
 
-#: parakeet_dictation/controller.py:45
+#: parakeet_dictation/controller.py:46
 msgid "Microphone unavailable — check Settings › General"
 msgstr "Мікрофон недоступний — перевірте Налаштування › Загальні"
 
-#: parakeet_dictation/controller.py:47 parakeet_dictation/ui/overlay.py:975
+#: parakeet_dictation/controller.py:48 parakeet_dictation/ui/overlay.py:975
 msgid "Dictation failed"
 msgstr "Не вдалося виконати диктування"
 
-#: parakeet_dictation/controller.py:366
+#: parakeet_dictation/controller.py:370
 msgid "Nothing to stop — press and hold to dictate"
 msgstr "Нічого зупиняти — утримуйте клавішу для диктування"
 
-#: parakeet_dictation/controller.py:464
+#: parakeet_dictation/controller.py:468
 msgid "Insertion failed — text was not pasted"
 msgstr "Не вдалося вставити текст"
 
-#: parakeet_dictation/controller.py:626
+#: parakeet_dictation/controller.py:680
 #, python-brace-format
 msgid ""
 "The settings could not be saved to {path}. They apply until the app quits."
@@ -41,12 +41,12 @@ msgstr ""
 "Не вдалося зберегти налаштування у {path}. Вони діятимуть, доки програму не "
 "закрито."
 
-#: parakeet_dictation/controller.py:704
+#: parakeet_dictation/controller.py:758
 #, python-brace-format
 msgid "Error: {message}"
 msgstr "Помилка: {message}"
 
-#: parakeet_dictation/controller.py:725
+#: parakeet_dictation/controller.py:779
 #, python-brace-format
 msgid "{message} — text is on the clipboard"
 msgstr "{message} — текст у буфері обміну"
@@ -85,21 +85,21 @@ msgstr ""
 "{binding} уже використовує {owner} — змініть комбінацію в Налаштуваннях або "
 "в Системних параметрах > Скорочення"
 
-#: parakeet_dictation/insert.py:510
+#: parakeet_dictation/insert.py:543
 #, python-brace-format
 msgid "{exe} not found — install {hint}"
 msgstr "{exe} не знайдено — встановіть {hint}"
 
-#: parakeet_dictation/insert.py:600 parakeet_dictation/insert.py:647
+#: parakeet_dictation/insert.py:635 parakeet_dictation/insert.py:682
 #, python-brace-format
 msgid "Insertion failed: {error}"
 msgstr "Не вдалося вставити: {error}"
 
-#: parakeet_dictation/insert.py:696
+#: parakeet_dictation/insert.py:731
 msgid "Insertion failed: wl-copy timed out"
 msgstr "Не вдалося вставити: wl-copy не відповів вчасно"
 
-#: parakeet_dictation/insert.py:707
+#: parakeet_dictation/insert.py:742
 msgid "Text is on the clipboard — press Ctrl+V"
 msgstr "Текст у буфері обміну — натисніть Ctrl+V"
 
@@ -170,7 +170,7 @@ msgid "Settings…"
 msgstr "Налаштування…"
 
 #: parakeet_dictation/ui/menu_model.py:55
-#: parakeet_dictation/ui/settings/pages.py:303
+#: parakeet_dictation/ui/settings/pages.py:307
 msgid "About"
 msgstr "Про програму"
 
@@ -422,32 +422,48 @@ msgstr "Автоматично (портал, інакше ydotool)"
 msgid "KDE portal"
 msgstr "Портал KDE"
 
-#: parakeet_dictation/ui/settings/pages.py:257
+#: parakeet_dictation/ui/settings/pages.py:250
+msgid "KDE portal session:"
+msgstr "Сесія порталу KDE:"
+
+#: parakeet_dictation/ui/settings/pages.py:251
+msgid "Open while the app runs"
+msgstr "Відкрита, поки програма працює"
+
+#: parakeet_dictation/ui/settings/pages.py:252
+msgid "Only while dictating"
+msgstr "Лише під час диктовки"
+
+#: parakeet_dictation/ui/settings/pages.py:253
+msgid "While it is open, Plasma shows a “Remote Control” icon in the tray."
+msgstr "Поки вона відкрита, Plasma показує в треї значок «Remote Control»."
+
+#: parakeet_dictation/ui/settings/pages.py:261
 msgid "Terminals (Ctrl+Shift+V):"
 msgstr "Термінали (Ctrl+Shift+V):"
 
-#: parakeet_dictation/ui/settings/pages.py:257
+#: parakeet_dictation/ui/settings/pages.py:261
 msgid "Window classes, comma-separated."
 msgstr "Класи вікон через кому."
 
-#: parakeet_dictation/ui/settings/pages.py:258
+#: parakeet_dictation/ui/settings/pages.py:262
 msgid "Diagnostics"
 msgstr "Діагностика"
 
-#: parakeet_dictation/ui/settings/pages.py:260
+#: parakeet_dictation/ui/settings/pages.py:264
 msgid "Write a diagnostics log"
 msgstr "Вести журнал діагностики"
 
-#: parakeet_dictation/ui/settings/pages.py:261
+#: parakeet_dictation/ui/settings/pages.py:265
 msgid "Open folder"
 msgstr "Відкрити теку"
 
-#: parakeet_dictation/ui/settings/pages.py:264
+#: parakeet_dictation/ui/settings/pages.py:268
 msgid "Timings and character counts only. Text and audio are never recorded."
 msgstr ""
 "Лише тривалості та кількість символів. Текст і звук ніколи не записуються."
 
-#: parakeet_dictation/ui/settings/pages.py:277
+#: parakeet_dictation/ui/settings/pages.py:281
 msgid ""
 "Offline dictation for KDE Plasma: hold a key, speak, release.\n"
 "Recognition runs on this computer; nothing is sent over the network."
@@ -455,11 +471,11 @@ msgstr ""
 "Офлайн-диктування для KDE Plasma: утримуйте клавішу, говоріть, відпустіть.\n"
 "Розпізнавання працює на цьому комп'ютері; нічого не надсилається в мережу."
 
-#: parakeet_dictation/ui/settings/pages.py:282
+#: parakeet_dictation/ui/settings/pages.py:286
 msgid "MIT licence · © Daniel Rosehill, Vadym Dziuba"
 msgstr "Ліцензія MIT · © Daniel Rosehill, Vadym Dziuba"
 
-#: parakeet_dictation/ui/settings/pages.py:283
+#: parakeet_dictation/ui/settings/pages.py:287
 msgid ""
 "Parakeet TDT model — NVIDIA, CC-BY-4.0 · TEN VAD — Agora, Apache-2.0 with "
 "additional conditions"
@@ -467,19 +483,19 @@ msgstr ""
 "Модель Parakeet TDT — NVIDIA, CC-BY-4.0 · TEN VAD — Agora, Apache-2.0 з "
 "додатковими умовами"
 
-#: parakeet_dictation/ui/settings/pages.py:299
+#: parakeet_dictation/ui/settings/pages.py:303
 msgid "General"
 msgstr "Загальні"
 
-#: parakeet_dictation/ui/settings/pages.py:300
+#: parakeet_dictation/ui/settings/pages.py:304
 msgid "Recognition"
 msgstr "Розпізнавання"
 
-#: parakeet_dictation/ui/settings/pages.py:301
+#: parakeet_dictation/ui/settings/pages.py:305
 msgid "Text Output"
 msgstr "Вставлення"
 
-#: parakeet_dictation/ui/settings/pages.py:302
+#: parakeet_dictation/ui/settings/pages.py:306
 msgid "Advanced"
 msgstr "Додатково"
 

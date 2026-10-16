@@ -247,6 +247,10 @@ def advanced(win):
     paste.row(_("Key press method:"), win.bind_combo("paste_transport", [
         ("auto", _("Automatic (portal, else ydotool)")), ("portal", _("KDE portal")),
         ("ydotool", "ydotool")]))
+    paste.row(_("KDE portal session:"), win.bind_combo("portal_session", [
+        ("always", _("Open while the app runs")),
+        ("during_take", _("Only while dictating"))]),
+              _("While it is open, Plasma shows a “Remote Control” icon in the tray."))
     terms = Gtk.Entry()
     terms.set_width_chars(40)
     terms.set_text(", ".join(win.draft.get("terminal_window_classes")))

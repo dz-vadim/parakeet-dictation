@@ -8,6 +8,7 @@ from gi.repository import GLib
 
 from . import audio
 from . import config as config_module
+from . import insert as insert_module
 from . import shortcuts
 from .config import AppConfig
 from .diagnostics import DIAG
@@ -242,6 +243,9 @@ class DictationController:
         self._enter(GESTURE_STARTING, "start")
         self._preview_reset()
         self._overlay_state("preparing")
+        if self._portal_per_take():
+            # Restored while the user speaks; never the first-time prompt.
+            self._portal_call("start_async", interactive=False)
         self._engine.start()
 
     def stop(self, hold_off: bool = True):
@@ -581,6 +585,55 @@ class DictationController:
             self.start(kind="hold")
         elif queued:
             DIAG.log("queued_start_dropped", outcome=outcome, take=self._take_seq)
+        if not reopen and self._portal_per_take():
+            # After every paste still queued has gone out, not now: a cancel
+            # can end the take with per-segment pastes in flight.
+            self._typer.after_pending(
+                lambda: GLib.idle_add(self._release_portal_if_idle))
+
+    # --- portal session (the "Remote Control" tray icon) --------------------
+
+    def _portal_used(self) -> bool:
+        c = self._config
+        return c.paste_transport != "ydotool" and c.typer != "ydotool"
+
+    def _portal_per_take(self) -> bool:
+        return self._portal_used() and self._config.portal_session == "during_take"
+
+    @staticmethod
+    def _portal_call(method: str, **kwargs):
+        portal = insert_module.portal_keyboard()
+        if portal is not None:
+            getattr(portal, method)(**kwargs)
+
+    def _release_portal_if_idle(self):
+        # A take that opened in the meantime keeps the session it found.
+        if (self._portal_per_take() and self._gesture == GESTURE_IDLE
+                and not self._engine.is_running):
+            self._portal_call("release")
+        return GLib.SOURCE_REMOVE
+
+    def init_portal(self):
+        """At app start.  "always" opens the session now, so its one-time
+        prompt never lands in the middle of an insertion.  "during_take"
+        opens it now only when there is no grant yet — to get that prompt
+        out of the way — and lets it go as soon as it is up."""
+        if not self._portal_used():
+            return
+        if self._config.portal_session == "always":
+            self._portal_call("start_async")
+        elif not insert_module.PortalKeyboard.load_token():
+            self._portal_call("start_async")
+            self._portal_call("release")      # closes it once the grant is in
+
+    def _sync_portal(self):
+        """After a settings change, while idle: match the session to the mode."""
+        if not self._portal_used():
+            self._portal_call("release")
+        elif self._config.portal_session == "always":
+            self._portal_call("start_async")
+        else:
+            self._portal_call("release")
 
     def pause(self):
         self._engine.pause()
@@ -611,6 +664,7 @@ class DictationController:
         audio._active_config = new_config     # quiet hours: the beeps read this one
         saved = self._config.save(DIAG.log)
         self._typer = self._make_typer(new_config)
+        self._sync_portal()
         DIAG.set_enabled(new_config.diagnostics)
         if self._overlay:
             self._overlay.apply_config(new_config)

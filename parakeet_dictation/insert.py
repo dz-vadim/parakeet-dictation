@@ -195,6 +195,12 @@ class PortalKeyboard:
     that finds no ready session uses ydotool instead of raising a dialog.
     Typing whole text through the portal is not viable (Chromium/Electron on
     Plasma <= 6.7 drop non-layout characters), so this is chord-only.
+
+    While a session is open, Plasma shows a "Remote Control" tray icon.  With
+    `portal_session: during_take` the session is opened at each take's start
+    (non-interactive: restoring a saved grant takes ~10-50 ms, never a
+    dialog) and released when its insertion has gone out, so the icon only
+    shows while dictating.
     """
 
     BUS = "org.freedesktop.portal.Desktop"
@@ -214,6 +220,9 @@ class PortalKeyboard:
         self._state = "idle"     # idle | starting | ready | unavailable | failed
         self._thread = None
         self._lock = threading.Lock()
+        # False once release() asked for the session to go: a start still in
+        # flight then closes what it opened instead of leaving it up.
+        self._wanted = False
 
     @property
     def state(self) -> str:
@@ -316,10 +325,19 @@ class PortalKeyboard:
 
     # -- session lifecycle -------------------------------------------------
 
-    def start_async(self):
-        """Begin the session on a worker thread; `ready` flips when it is up."""
+    def start_async(self, interactive: bool = True):
+        """Begin the session on a worker thread; `ready` flips when it is up.
+
+        `interactive=False` only restores a saved grant: with no token there
+        is nothing to restore without the one-time "Remote Control" prompt,
+        and that prompt must not land in the middle of a take.
+        """
         with self._lock:
+            self._wanted = True
             if self._thread is not None or self._state == "ready":
+                return
+            if not interactive and not self.load_token():
+                DIAG.log("portal_session", ready=False, stage="no_token")
                 return
             self._state = "starting"
             self._thread = threading.Thread(target=self._start_worker, daemon=True,
@@ -346,6 +364,9 @@ class PortalKeyboard:
             ctx.pop_thread_default()
             with self._lock:
                 self._thread = None
+                unwanted = not self._wanted
+            if unwanted and self.ready:
+                self.close()
 
     def _start(self, ctx):
         t0 = time.monotonic()
@@ -441,6 +462,18 @@ class PortalKeyboard:
             return pasted
         return True
 
+    def release(self):
+        """Drop the session (and its tray icon) until the next start_async().
+
+        A start still in flight closes the session it opens when it finishes.
+        """
+        with self._lock:
+            self._wanted = False
+            starting = self._thread is not None
+        if not starting and self._session is not None:
+            self.close()
+            DIAG.log("portal_session_released")
+
     def close(self):
         session, self._session = self._session, None
         self._state = "idle"
@@ -512,6 +545,8 @@ def _report_missing(exc, fallback: str, method: str, notify=None) -> str:
 
 
 class TextTyper:
+    PORTAL_WAIT_S = 1.0     # longest a chord waits for a session still starting
+
     def __init__(self, method: str = "clipboard", keep_on_clipboard: bool = False,
                  paste_chord: str = CHORD_CTRL_V,
                  terminal_paste_chord: str = CHORD_CTRL_SHIFT_V,
@@ -801,7 +836,13 @@ class TextTyper:
         if self._transport == "ydotool":
             return None
         portal = portal_keyboard()
-        return portal if portal is not None and portal.ready else None
+        if portal is None:
+            return None
+        if portal.state == "starting":
+            # A take's own session (portal_session: during_take) restores in
+            # tens of ms; a take shorter than that waits a moment, not ydotool.
+            portal.wait(self.PORTAL_WAIT_S)
+        return portal if portal.ready else None
 
     def _send_chord(self, chord: str) -> tuple:
         """Press one chord.  Returns (ok, transport)."""

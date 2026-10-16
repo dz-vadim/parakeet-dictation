@@ -74,10 +74,9 @@ def main():
     focus = FocusTracker(enabled=config.focus_script)
     focus.start()
     controller.set_focus_probe(focus.snapshot)
-    # The portal session is opened NOW, not at the first paste: its one-time
-    # "Remote Control" prompt must never land in the middle of an insertion.
-    if config.paste_transport != "ydotool" and config.typer != "ydotool":
-        insert.portal_keyboard().start_async()
+    # The portal session (or, per take, just its first-time grant) is set up
+    # NOW: its one-time "Remote Control" prompt must never land mid-insertion.
+    controller.init_portal()
 
     # tray referenced in hotkey lambdas — assigned after creation
     tray = None

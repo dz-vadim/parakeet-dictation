@@ -134,6 +134,12 @@ class AppConfig:
     # available, ydotool otherwise.
     paste_transport: str = "auto"
 
+    # When that portal session is open — Plasma shows a "Remote Control" tray
+    # icon for as long as it is.  "always": from app start to quit;
+    # "during_take": only while a take records and pastes (the saved grant is
+    # restored silently in tens of ms), so the icon means dictation is on.
+    portal_session: str = "always"
+
     # The push-to-talk release is reported when the FIRST key of the
     # combination goes up, and the modifier (Meta in Meta+Z) is usually still
     # held for a few hundred ms.  A chord sent in that window carries Super
@@ -371,6 +377,7 @@ _ENUMS = {
     "insert_mode": ("end_of_take", "per_segment"),
     "overlay_position": ("bottom", "top"),
     "paste_transport": ("auto", "portal", "ydotool"),
+    "portal_session": ("always", "during_take"),
     "typer": ("clipboard", "wtype", "ydotool"),
     "tray_icon_style": ("mic", "parrot", "wave"),
     "paste_chord": _CHORDS,
